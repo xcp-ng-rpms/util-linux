@@ -1,0 +1,80 @@
+From e79193698c704dce4f17f7a872da59d7c9c6eba2 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 22 Jan 2019 11:50:20 +0100
+Subject: [PATCH 3/4] losetup: properly use --sector-size when create a new
+ device
+
+The --partscan functionality depends on sector size. Make sure
+sector size is set before we force kernel to scan the device for
+partitions. For example:
+
+ losetup -f loopfile --sector-size 4KiB --partscan --show
+
+where 'loopfile' contains GPT with 4096 sectors.
+
+Reported-by: Jeffrey Ferreira <jeffpferreira@gmail.com>
+Signed-off-by: Karel Zak <kzak@redhat.com>
+(cherry picked from commit 422f0e9f206a145c59a71333dad20d38cbbfc0c4)
+---
+ sys-utils/losetup.8 |  4 +++-
+ sys-utils/losetup.c | 15 +++++++--------
+ 2 files changed, 10 insertions(+), 9 deletions(-)
+
+diff --git a/sys-utils/losetup.8 b/sys-utils/losetup.8
+index 48e37c198..6a4cb450e 100644
+--- a/sys-utils/losetup.8
++++ b/sys-utils/losetup.8
+@@ -103,7 +103,9 @@ Set the logical sector size of the loop device in bytes (since Linux 4.14). The
+ option may be used when create a new loop device as well as stand-alone command
+ to modify sector size of the already existing loop device.
+ .IP "\fB\-P, \-\-partscan\fP"
+-force kernel to scan partition table on newly created loop device
++force kernel to scan partition table on newly created loop device.  Note that the
++partition table parsing depends on sector sizes.  The default is sector size is 512 bytes,
++otherwise you need to use use the option \fB\-\-sector\-size\fR together with \fB\-\-partscan\fR.
+ .IP "\fB\-r, \-\-read-only\fP"
+ setup read-only loop device
+ .IP "\fB\-\-show\fP"
+diff --git a/sys-utils/losetup.c b/sys-utils/losetup.c
+index ffd4c682f..40284e8f5 100644
+--- a/sys-utils/losetup.c
++++ b/sys-utils/losetup.c
+@@ -639,6 +639,9 @@ int main(int argc, char **argv)
+ 				loopcxt_set_sizelimit(&lc, sizelimit);
+ 			if (lo_flags)
+ 				loopcxt_set_flags(&lc, lo_flags);
++			if (blocksize > 0)
++				loopcxt_set_blocksize(&lc, blocksize);
++
+ 			if ((res = loopcxt_set_backing_file(&lc, file))) {
+ 				warn(_("%s: failed to use backing file"), file);
+ 				break;
+@@ -661,8 +664,6 @@ int main(int argc, char **argv)
+ 			if (showdev)
+ 				printf("%s\n", loopcxt_get_device(&lc));
+ 			warn_size(file, sizelimit);
+-			if set_blocksize
+-				goto lo_set_post;
+ 		}
+ 		break;
+ 	}
+@@ -706,12 +707,10 @@ int main(int argc, char **argv)
+ 			        loopcxt_get_device(&lc));
+ 		break;
+ 	case A_SET_BLOCKSIZE:
+- lo_set_post:
+-		if (set_blocksize) {
+-			res = loopcxt_set_blocksize(&lc, blocksize);
+-			if (res)
+-				warn(_("%s: set logical block size failed"),
+-				        loopcxt_get_device(&lc));
++		res = loopcxt_set_blocksize(&lc, blocksize);
++		if (res)
++			warn(_("%s: set logical block size failed"),
++			        loopcxt_get_device(&lc));
+ 		break;
+ 	default:
+ 		usage(stderr);
+-- 
+2.39.2
+

@@ -1,0 +1,26 @@
+From 80760625f29f1b67a6bf8e8dfe9bfb37fd9a743b Mon Sep 17 00:00:00 2001
+From: Alberto Ruiz <aruiz@gnome.org>
+Date: Thu, 12 May 2022 23:35:21 +0200
+Subject: [PATCH 4/4] losetup: Fix typo for the --sector-size docs
+
+(cherry picked from commit 034727a2e48b67673fea59a746b5b5c077bc2b03)
+---
+ sys-utils/losetup.8 | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sys-utils/losetup.8 b/sys-utils/losetup.8
+index 6a4cb450e..a8cc4d19e 100644
+--- a/sys-utils/losetup.8
++++ b/sys-utils/losetup.8
+@@ -100,7 +100,7 @@ specify which columns are to be printed for the \fB\-\-list\fP output
+ the data end is set to no more than \fIsize\fP bytes after the data start
+ .IP "\fB-b, \-\-sector-size \fIsize\fP"
+ Set the logical sector size of the loop device in bytes (since Linux 4.14). The
+-option may be used when create a new loop device as well as stand-alone command
++option may be used when creating a new loop device as well as a stand-alone command
+ to modify sector size of the already existing loop device.
+ .IP "\fB\-P, \-\-partscan\fP"
+ force kernel to scan partition table on newly created loop device.  Note that the
+-- 
+2.39.2
+
