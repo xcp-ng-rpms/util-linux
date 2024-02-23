@@ -1,0 +1,12 @@
+diff -up util-linux-2.23.2/sys-utils/lscpu.c.kzak util-linux-2.23.2/sys-utils/lscpu.c
+--- util-linux-2.23.2/sys-utils/lscpu.c.kzak	2014-09-24 10:27:29.410899893 +0200
++++ util-linux-2.23.2/sys-utils/lscpu.c	2014-09-24 10:33:20.960254060 +0200
+@@ -809,7 +809,7 @@ static inline int is_node_dirent(struct
+ 	return
+ 		d &&
+ #ifdef _DIRENT_HAVE_D_TYPE
+-		d->d_type == DT_DIR &&
++		(d->d_type == DT_DIR || d->d_type == DT_UNKNOWN) &&
+ #endif
+ 		strncmp(d->d_name, "node", 4) == 0 &&
+ 		isdigit_string(d->d_name + 4);

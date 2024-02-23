@@ -1,0 +1,22 @@
+diff -up util-linux-2.23.2/disk-utils/fsck.c.kzak util-linux-2.23.2/disk-utils/fsck.c
+--- util-linux-2.23.2/disk-utils/fsck.c.kzak	2013-06-13 09:46:10.377650254 +0200
++++ util-linux-2.23.2/disk-utils/fsck.c	2014-03-25 12:46:59.525939425 +0100
+@@ -437,10 +437,14 @@ static void load_fs_info(void)
+ 	if (mnt_table_parse_fstab(fstab, path)) {
+ 		if (!path)
+ 			path = mnt_get_fstab_path();
+-		if (errno)
+-			warn(_("%s: failed to parse fstab"), path);
+-		else
+-			warnx(_("%s: failed to parse fstab"), path);
++
++		/* don't print error when there is no fstab at all */
++		if (access(path, F_OK) == 0) {
++			if (errno)
++				warn(_("%s: failed to parse fstab"), path);
++			else
++				warnx(_("%s: failed to parse fstab"), path);
++		}
+ 	}
+ }
+ 

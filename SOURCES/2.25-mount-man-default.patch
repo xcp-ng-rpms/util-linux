@@ -1,0 +1,27 @@
+diff -up util-linux-2.23.2/sys-utils/mount.8.kzak util-linux-2.23.2/sys-utils/mount.8
+--- util-linux-2.23.2/sys-utils/mount.8.kzak	2015-06-24 10:44:54.888929869 +0200
++++ util-linux-2.23.2/sys-utils/mount.8	2015-06-24 10:48:10.022436703 +0200
+@@ -865,9 +865,10 @@ Some of these options are only useful wh
+ .I /etc/fstab
+ file.
+ 
+-Some of these options could be enabled or disabled by default
+-in the system kernel. To check the current setting see the options
+-in /proc/mounts.
++Some of these  options  could be enabled or disabled by default in the system
++kernel.  To check the current setting see the options in /proc/mounts.  Note
++that filesystems also have per-filesystem specific default mount options (see
++for example tune2fs -l output for extN filesystems).
+ 
+ The following options apply to any filesystem that is being
+ mounted (but not every filesystem actually honors them - e.g., the
+@@ -973,6 +974,9 @@ For more details, see
+ .B defaults
+ Use default options:
+ .BR rw ", " suid ", " dev ", " exec ", " auto ", " nouser ", and " async.
++
++Note that the real set of the all default mount options depends on kernel
++and filesystem type. See the begin of this section for more details.
+ .TP
+ .B dev
+ Interpret character or block special devices on the filesystem.

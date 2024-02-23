@@ -1,0 +1,36 @@
+From ab0e0fa7a45bccf8304edcb2a904f30a4f3a48b1 Mon Sep 17 00:00:00 2001
+From: Rik van Riel <riel@redhat.com>
+Date: Fri, 6 Dec 2013 16:07:54 -0500
+Subject: [PATCH] taskset: fix PERMISSIONS section of taskset man page
+
+A user is always allowed to change the CPU affinity of his or her
+own processes. CAP_SYS_NICE is only required to change the affinity
+of another user's process.
+
+Signed-off-by: Rik van Riel <riel@redhat.com>
+Reported-by: Joe Mario <jmario@redhat.com>
+---
+ schedutils/taskset.1 | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/schedutils/taskset.1 b/schedutils/taskset.1
+index ade202b..fb5738c 100644
+--- a/schedutils/taskset.1
++++ b/schedutils/taskset.1
+@@ -102,10 +102,11 @@ Or set it:
+ .B taskset \-p
+ .I mask pid
+ .SH PERMISSIONS
++A user can change the CPU affinity of a process belonging to the same user.
+ A user must possess
+ .B CAP_SYS_NICE
+-to change the CPU affinity of a process.  Any user can retrieve the affinity
+-mask.
++to change the CPU affinity of a process belonging to another user.
++A user can retrieve the affinity mask of any process.
+ .SH AUTHOR
+ Written by Robert M. Love.
+ .SH COPYRIGHT
+-- 
+1.8.4.2
+

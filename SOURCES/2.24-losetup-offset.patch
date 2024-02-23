@@ -1,0 +1,32 @@
+diff -up util-linux-2.23.2/lib/loopdev.c.kzak util-linux-2.23.2/lib/loopdev.c
+--- util-linux-2.23.2/lib/loopdev.c.kzak	2014-09-25 10:16:23.521897462 +0200
++++ util-linux-2.23.2/lib/loopdev.c	2014-09-25 10:23:38.852050990 +0200
+@@ -1129,6 +1129,12 @@ static int loopcxt_check_size(struct loo
+ 		return -errno;
+ 	}
+ 
++	/* It's block device, so, align to 512-byte sectors */
++	if (expected_size % 512) {
++		DBG(lc, loopdev_debug("expected size misaligned to 512-byte sectors"));
++		expected_size = (expected_size >> 9) << 9;
++	}
++
+ 	if (expected_size != size) {
+ 		DBG(lc, loopdev_debug("warning: loopdev and expected "
+ 				      "size dismatch (%ju/%ju)",
+diff -up util-linux-2.23.2/sys-utils/losetup.c.kzak util-linux-2.23.2/sys-utils/losetup.c
+--- util-linux-2.23.2/sys-utils/losetup.c.kzak	2014-09-25 10:16:23.521897462 +0200
++++ util-linux-2.23.2/sys-utils/losetup.c	2014-09-25 10:23:38.852050990 +0200
+@@ -632,11 +632,7 @@ int main(int argc, char **argv)
+ 			/* errors */
+ 			errpre = hasdev && loopcxt_get_fd(&lc) < 0 ?
+ 					 loopcxt_get_device(&lc) : file;
+-			if (errno == ERANGE && offset && offset % 512)
+-				warnx(_("%s: failed to set up loop device, "
+-					"offset is not 512-byte aligned."), errpre);
+-			else
+-				warn(_("%s: failed to set up loop device"), errpre);
++			warn(_("%s: failed to set up loop device"), errpre);
+ 			break;
+ 		} while (hasdev == 0);
+ 

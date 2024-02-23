@@ -1,0 +1,50 @@
+From 6b70da7e86ae17c215c48156a59e76b9f89e8add Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 5 Oct 2017 11:07:41 +0200
+Subject: [PATCH 127/135] agetty: fix /etc/os-release parsing
+
+For example /etc/os-release:
+
+	VERSION="26 (Twenty Six)"
+	VERSION_ID=26
+
+agetty for \S{VERSION} returns
+
+	_ID=26
+
+because the parser does nor check for '=' after variable name.
+
+Upstream: http://github.com/karelzak/util-linux/commit/949e83997906ab8dd8442f28d74c34bb5a2395ee
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1498462
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ term-utils/agetty.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/term-utils/agetty.c b/term-utils/agetty.c
+index 5692126dd..b626cdbeb 100644
+--- a/term-utils/agetty.c
++++ b/term-utils/agetty.c
+@@ -1280,6 +1280,7 @@ static char *xgetdomainname(void)
+ 	return NULL;
+ }
+ 
++
+ static char *read_os_release(struct options *op, const char *varname)
+ {
+ 	int fd = -1;
+@@ -1329,6 +1330,11 @@ static char *read_os_release(struct options *op, const char *varname)
+ 			continue;
+ 		}
+ 		p += varsz;
++		p += strspn(p, " \t\n\r");
++
++		if (*p != '=')
++			continue;
++
+ 		p += strspn(p, " \t\n\r=\"");
+ 		eol = p + strcspn(p, "\n\r");
+ 		*eol = '\0';
+-- 
+2.13.6
+

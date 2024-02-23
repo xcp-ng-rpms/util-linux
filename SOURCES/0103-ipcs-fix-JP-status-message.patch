@@ -1,0 +1,27 @@
+From 68e4765ff497c6274c337a03874d2e4e8b04166d Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 20 Mar 2017 11:47:02 +0100
+Subject: [PATCH 103/116] ipcs: fix JP status message
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1358097
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ po/ja.po | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/po/ja.po b/po/ja.po
+index 4c748de..f0d3645 100644
+--- a/po/ja.po
++++ b/po/ja.po
+@@ -13013,7 +13013,7 @@ msgstr "セットされていません"
+ 
+ #: sys-utils/ipcs.c:327
+ msgid "dest"
+-msgstr "対象"
++msgstr "削除"
+ 
+ #: sys-utils/ipcs.c:328
+ msgid "locked"
+-- 
+2.9.3
+

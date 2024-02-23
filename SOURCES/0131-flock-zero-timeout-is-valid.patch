@@ -1,0 +1,50 @@
+From 31568ef6a91b0f441c64fe79f7fa94a32be4dc97 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 7 Oct 2014 12:12:39 +0200
+Subject: [PATCH 131/135] flock: zero timeout is valid
+
+This patch reverts Sami's "timeout cannot be zero", introduced
+in commit 605325b23b36238c8f3ae165e37cab9064553cf7.
+
+The --timeout 0 has been originally interpreted as --nonblock. The
+patch also add hint about this behavior to the man page.
+
+Upstream: http://github.com/karelzak/util-linux/commit/c4604c38b503c8c46e50fc2048ebbcbcfcad3802
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1455398
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/flock.1 | 4 +++-
+ sys-utils/flock.c | 2 --
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/sys-utils/flock.1 b/sys-utils/flock.1
+index b28526f69..d5e85e082 100644
+--- a/sys-utils/flock.1
++++ b/sys-utils/flock.1
+@@ -83,7 +83,9 @@ Fail if the lock cannot be acquired within
+ Decimal fractional values are allowed.
+ See the
+ .I \-E
+-option for the exit code used.
++option for the exit code used. The zero number of
++.IR seconds
++is interpreted as \fB\-\-nonblock\fR.
+ .TP
+ \fB\-o\fP, \fB\-\-close\fP
+ Close the file descriptor on which the lock is held before executing
+diff --git a/sys-utils/flock.c b/sys-utils/flock.c
+index 18625a029..7dad46af0 100644
+--- a/sys-utils/flock.c
++++ b/sys-utils/flock.c
+@@ -175,8 +175,6 @@ int main(int argc, char *argv[])
+ 			have_timeout = 1;
+ 			strtotimeval_or_err(optarg, &timeout.it_value,
+ 				_("invalid timeout value"));
+-			if (timeout.it_value.tv_sec + timeout.it_value.tv_usec == 0)
+-				errx(EX_USAGE, _("timeout cannot be zero"));
+ 			break;
+ 		case 'E':
+ 			conflict_exit_code = strtos32_or_err(optarg,
+-- 
+2.13.6
+

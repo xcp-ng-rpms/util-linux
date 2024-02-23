@@ -1,0 +1,48 @@
+From 7e1c9da4773237e368bdc0539ef91d55ef19806c Mon Sep 17 00:00:00 2001
+From: Tobias Stoeckmann <tobias@stoeckmann.org>
+Date: Sun, 28 Aug 2016 21:15:59 +0200
+Subject: [PATCH 114/116] libblkid: Avoid OOB access on illegal ZFS superblocks
+
+64 bit systems can trigger an out of boundary access while performing
+a ZFS superblock probe.
+
+This happens due to a possible integer overflow while calculating
+the remaining available bytes. The variable is of type "int" and the
+string length is allowed to be larger than INT_MAX, which means that
+avail calculation can overflow, circumventing the "avail < 0" check and
+therefore accessing memory outside the "buff" array later on.
+
+[kzak@redhat.com (rhel7): - remove unused swab_magic]
+
+Upstream: https://github.com/karelzak/util-linux/commit/8fa57ab0b5696031da800e243def32bc5265ff6d
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1392661
+Signed-off-by: Tobias Stoeckmann <tobias@stoeckmann.org>
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libblkid/src/superblocks/zfs.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/libblkid/src/superblocks/zfs.c b/libblkid/src/superblocks/zfs.c
+index ff12fa6..2c7b4b7 100644
+--- a/libblkid/src/superblocks/zfs.c
++++ b/libblkid/src/superblocks/zfs.c
+@@ -115,7 +115,7 @@ static void zfs_extract_guid_name(blkid_probe pr, loff_t offset)
+ 
+ 			nvs->nvs_type = be32_to_cpu(nvs->nvs_type);
+ 			nvs->nvs_strlen = be32_to_cpu(nvs->nvs_strlen);
+-			if (nvs->nvs_strlen > UINT_MAX - sizeof(*nvs))
++			if (nvs->nvs_strlen > INT_MAX - sizeof(*nvs))
+ 				break;
+ 			avail -= nvs->nvs_strlen + sizeof(*nvs);
+ 			nvdebug("nvstring: type %u string %*s\n", nvs->nvs_type,
+@@ -201,7 +201,6 @@ static int find_uberblocks(const void *label, loff_t *ub_offset, int *swap_endia
+  * #4 (@ 132kB) is the first one written on a new filesystem. */
+ static int probe_zfs(blkid_probe pr, const struct blkid_idmag *mag)
+ {
+-	uint64_t swab_magic = swab64(UBERBLOCK_MAGIC);
+ 	int swab_endian = 0;
+ 	struct zfs_uberblock *ub;
+ 	loff_t offset, ub_offset = 0;
+-- 
+2.9.3
+

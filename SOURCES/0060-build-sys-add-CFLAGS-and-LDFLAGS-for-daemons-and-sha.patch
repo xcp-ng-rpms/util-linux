@@ -1,0 +1,166 @@
+From 097c66ef2dd4779e01d13ad4a5f9733334fa9d1a Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 27 Aug 2013 10:02:04 +0200
+Subject: [PATCH 60/84] build-sys: add CFLAGS and LDFLAGS for daemons and
+ shared libs
+
+This is necessary for paranoid security guys who believe that things
+like "-Wl,-z,relro" or "-Wl,-z,bind_now" is a way how to make the
+world a safer place...
+
+[rhel7: add also SOLIB_* to libfdisk]
+
+Upstream: http://github.com/karelzak/util-linux/commit/03d00d495f3b505d9cae967c629fb38aca301e01
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1092520
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ Documentation/howto-compilation.txt | 10 +++++-----
+ configure.ac                        | 10 ++++++++++
+ libblkid/src/Makemodule.am          |  2 ++
+ libfdisk/src/Makemodule.am          |  3 +++
+ libmount/src/Makemodule.am          |  2 ++
+ libuuid/src/Makemodule.am           |  7 ++++++-
+ misc-utils/Makemodule.am            |  3 ++-
+ 7 files changed, 30 insertions(+), 7 deletions(-)
+
+diff --git a/Documentation/howto-compilation.txt b/Documentation/howto-compilation.txt
+index bebe0d2..4b39246 100644
+--- a/Documentation/howto-compilation.txt
++++ b/Documentation/howto-compilation.txt
+@@ -27,12 +27,12 @@ Compiling
+ 	The SUID_* feature is currently supported for chfn, chsh,
+ 	newgrp, su, write, mount, and umount.
+ 
+-	Preferred compilation options for developers, when
+-	using gcc, are:
++	Use DAEMON_CFLAGS and DAEMON_LDFLAGS when you want to define
++	special compiler options for daemons; supported for uuidd.
+ 
+-	export CFLAGS="-Wmissing-parameter-type -Wsign-compare
+-	-Wtype-limits -Wuninitialized -Wunused-parameter
+-	-Wunused-but-set-parameter -fno-common"
++	Use SOLIB_CFLAGS and SOLIB_LDFLAGS when you want to define
++	special compiler options for shared libraries; supported for
++	libmount, libblkid and libuuid.
+ 
+ 	FIXME: add notes about klib and uClib.
+ 
+diff --git a/configure.ac b/configure.ac
+index f7c27cd..f3c7214 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1538,6 +1538,16 @@ AC_ARG_VAR([SUID_CFLAGS],
+ AC_ARG_VAR([SUID_LDFLAGS],
+ 	   [LDFLAGS used for binaries which are usually with the suid bit])
+ 
++AC_ARG_VAR([DAEMON_CFLAGS],
++	   [CFLAGS used for binaries which are usually executed as daemons])
++AC_ARG_VAR([DAEMON_LDFLAGS],
++	   [LDFLAGS used for binaries which are usually executed as daemons])
++
++AC_ARG_VAR([SOLIB_CFLAGS],
++	   [CFLAGS used for shared libraries])
++AC_ARG_VAR([SOLIB_LDFLAGS],
++	   [LDFLAGS used for shared libraries])
++
+ LIBS=""
+ 
+ 
+diff --git a/libblkid/src/Makemodule.am b/libblkid/src/Makemodule.am
+index 04d8621..1563976 100644
+--- a/libblkid/src/Makemodule.am
++++ b/libblkid/src/Makemodule.am
+@@ -113,6 +113,7 @@ libblkid_la_LIBADD = libcommon.la
+ 
+ 
+ libblkid_la_CFLAGS = \
++	$(SOLIB_CFLAGS) \
+ 	-I$(ul_libblkid_incdir) \
+ 	-I$(top_srcdir)/libblkid/src
+ 
+@@ -128,6 +129,7 @@ libblkid_la_DEPENDENCIES = \
+ 	libblkid/src/blkid.h.in
+ 
+ libblkid_la_LDFLAGS = \
++	$(SOLIB_LDFLAGS) \
+ 	-Wl,--version-script=$(top_srcdir)/libblkid/src/blkid.sym \
+ 	-version-info $(LIBBLKID_VERSION_INFO)
+ 
+diff --git a/libfdisk/src/Makemodule.am b/libfdisk/src/Makemodule.am
+index fbfb1b4..5c50001 100644
+--- a/libfdisk/src/Makemodule.am
++++ b/libfdisk/src/Makemodule.am
+@@ -25,6 +25,8 @@ nodist_libfdisk_la_SOURCES = libfdisk/src/fdiskP.h
+ libfdisk_la_LIBADD = libcommon.la
+ 
+ libfdisk_la_CFLAGS = \
++	$(AM_CFLAGS) \
++	$(SOLIB_CFLAGS) \
+ 	-I$(ul_libfdisk_incdir) \
+ 	-I$(top_srcdir)/libfdisk/src
+ 
+@@ -39,6 +41,7 @@ libfdisk_la_CFLAGS += -I$(ul_libuuid_incdir)
+ endif
+ 
+ libfdisk_la_DEPENDENCIES = $(libfdisk_la_LIBADD)
++libfdisk_la_LDFLAGS = $(SOLIB_LDFLAGS)
+ 
+ 
+ check_PROGRAMS += \
+diff --git a/libmount/src/Makemodule.am b/libmount/src/Makemodule.am
+index 494e02a..8ef07e5 100644
+--- a/libmount/src/Makemodule.am
++++ b/libmount/src/Makemodule.am
+@@ -33,6 +33,7 @@ nodist_libmount_la_SOURCES = libmount/src/mountP.h
+ libmount_la_LIBADD = libcommon.la libblkid.la $(SELINUX_LIBS)
+ 
+ libmount_la_CFLAGS = \
++	$(SOLIB_CFLAGS) \
+ 	-I$(ul_libblkid_incdir) \
+ 	-I$(ul_libmount_incdir) \
+ 	-I$(top_srcdir)/libmount/src
+@@ -43,6 +44,7 @@ libmount_la_DEPENDENCIES = \
+ 	libmount/src/libmount.h.in
+ 
+ libmount_la_LDFLAGS = \
++	$(SOLIB_LDFLAGS) \
+ 	-Wl,--version-script=$(top_srcdir)/libmount/src/libmount.sym \
+ 	-version-info $(LIBMOUNT_VERSION_INFO)
+ 
+diff --git a/libuuid/src/Makemodule.am b/libuuid/src/Makemodule.am
+index 73f1ba9..a20cb4c 100644
+--- a/libuuid/src/Makemodule.am
++++ b/libuuid/src/Makemodule.am
+@@ -29,9 +29,14 @@ libuuid_la_SOURCES = \
+ 
+ libuuid_la_DEPENDENCIES = libuuid/src/uuid.sym
+ libuuid_la_LIBADD       = $(SOCKET_LIBS)
+-libuuid_la_CFLAGS       = -I$(ul_libuuid_incdir) -Ilibuuid/src
++
++libuuid_la_CFLAGS = \
++	 $(SOLIB_CFLAGS) \
++	 -I$(ul_libuuid_incdir) \
++	 -Ilibuuid/src
+ 
+ libuuid_la_LDFLAGS = \
++	$(SOLIB_LDFLAGS) \
+ 	-Wl,--version-script=$(top_srcdir)/libuuid/src/uuid.sym \
+ 	-version-info $(LIBUUID_VERSION_INFO)
+ 
+diff --git a/misc-utils/Makemodule.am b/misc-utils/Makemodule.am
+index a615047..70a78f2 100644
+--- a/misc-utils/Makemodule.am
++++ b/misc-utils/Makemodule.am
+@@ -77,7 +77,8 @@ if BUILD_UUIDD
+ usrsbin_exec_PROGRAMS += uuidd
+ dist_man_MANS += misc-utils/uuidd.8
+ uuidd_LDADD = $(LDADD) libuuid.la
+-uuidd_CFLAGS = $(AM_CFLAGS) -I$(ul_libuuid_incdir)
++uuidd_CFLAGS = $(DAEMON_CFLAGS) $(AM_CFLAGS) -I$(ul_libuuid_incdir)
++uuidd_LDFLAGS = $(DAEMON_LDFLAGS) $(AM_LDFLAGS)
+ uuidd_SOURCES = misc-utils/uuidd.c
+ if USE_SOCKET_ACTIVATION
+ uuidd_SOURCES += misc-utils/sd-daemon.c misc-utils/sd-daemon.h
+-- 
+2.7.4
+

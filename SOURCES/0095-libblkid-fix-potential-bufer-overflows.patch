@@ -1,0 +1,103 @@
+From 55540ea3dfdc707dc998333fd0715549522464fb Mon Sep 17 00:00:00 2001
+From: Sebastian Krahmer <krahmer@suse.de>
+Date: Fri, 5 Dec 2014 10:06:42 +0100
+Subject: [PATCH 095/116] libblkid: fix potential bufer overflows
+
+While digging deeper into libblk probing, I found that some
+computations might wrap and allocate too few buffer space which then
+overflows. In particular on 32bit systems (chromebook) where size_t is
+32bit, this is problematic (for 64bit the result fits into the calloc
+size_t).
+
+Upstream: Upstream: https://github.com/karelzak/util-linux/commit/109df14fad4e9570e26950913ebace6c79289400
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1392656
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libblkid/src/partitions/gpt.c  | 12 ++++++++----
+ libblkid/src/probe.c           |  7 +++++++
+ libblkid/src/superblocks/zfs.c |  3 +++
+ 3 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/libblkid/src/partitions/gpt.c b/libblkid/src/partitions/gpt.c
+index 6ab0dc6..e801ea3 100644
+--- a/libblkid/src/partitions/gpt.c
++++ b/libblkid/src/partitions/gpt.c
+@@ -17,6 +17,7 @@
+ #include <stdlib.h>
+ #include <stdint.h>
+ #include <stddef.h>
++#include <limits.h>
+ 
+ #include "partitions.h"
+ #include "crc32.h"
+@@ -266,14 +267,17 @@ static struct gpt_header *get_gpt_header(
+ 		return NULL;
+ 	}
+ 
+-	/* Size of blocks with GPT entries */
+-	esz = le32_to_cpu(h->num_partition_entries) *
+-			le32_to_cpu(h->sizeof_partition_entry);
+-	if (!esz) {
++	if (le32_to_cpu(h->num_partition_entries) == 0 ||
++	    le32_to_cpu(h->sizeof_partition_entry) == 0 ||
++	    ULONG_MAX / le32_to_cpu(h->num_partition_entries) < le32_to_cpu(h->sizeof_partition_entry)) {
+ 		DBG(LOWPROBE, blkid_debug("GPT entries undefined"));
+ 		return NULL;
+ 	}
+ 
++	/* Size of blocks with GPT entries */
++	esz = le32_to_cpu(h->num_partition_entries) *
++			le32_to_cpu(h->sizeof_partition_entry);
++
+ 	/* The header seems valid, save it
+ 	 * (we don't care about zeros in hdr->reserved2 area) */
+ 	memcpy(hdr, h, sizeof(*h));
+diff --git a/libblkid/src/probe.c b/libblkid/src/probe.c
+index f9fab5b..9cf099a 100644
+--- a/libblkid/src/probe.c
++++ b/libblkid/src/probe.c
+@@ -103,6 +103,7 @@
+ #include <inttypes.h>
+ #include <stdint.h>
+ #include <stdarg.h>
++#include <limits.h>
+ 
+ #ifdef HAVE_LIBUUID
+ # include <uuid.h>
+@@ -565,6 +566,12 @@ unsigned char *blkid_probe_get_buffer(blkid_probe pr,
+ 			return NULL;
+ 		}
+ 
++		/* someone trying to overflow some buffers? */
++		if (len > ULONG_MAX - sizeof(struct blkid_bufinfo)) {
++			errno = ENOMEM;
++			return NULL;
++		}
++
+ 		/* allocate info and space for data by why call */
+ 		bf = calloc(1, sizeof(struct blkid_bufinfo) + len);
+ 		if (!bf) {
+diff --git a/libblkid/src/superblocks/zfs.c b/libblkid/src/superblocks/zfs.c
+index 406ba2b..56ee472 100644
+--- a/libblkid/src/superblocks/zfs.c
++++ b/libblkid/src/superblocks/zfs.c
+@@ -12,6 +12,7 @@
+ #include <errno.h>
+ #include <ctype.h>
+ #include <inttypes.h>
++#include <limits.h>
+ 
+ #include "superblocks.h"
+ 
+@@ -108,6 +109,8 @@ static void zfs_extract_guid_name(blkid_probe pr, loff_t offset)
+ 
+ 			nvs->nvs_type = be32_to_cpu(nvs->nvs_type);
+ 			nvs->nvs_strlen = be32_to_cpu(nvs->nvs_strlen);
++			if (nvs->nvs_strlen > UINT_MAX - sizeof(*nvs))
++				break;
+ 			avail -= nvs->nvs_strlen + sizeof(*nvs);
+ 			nvdebug("nvstring: type %u string %*s\n", nvs->nvs_type,
+ 				nvs->nvs_strlen, nvs->nvs_string);
+-- 
+2.9.3
+

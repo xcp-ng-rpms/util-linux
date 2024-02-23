@@ -1,0 +1,44 @@
+From 289f0cd75f168f86702913658ebe2dbfd8e987c6 Mon Sep 17 00:00:00 2001
+From: Nate Clark <nate@neworld.us>
+Date: Wed, 4 Jan 2017 15:21:17 -0500
+Subject: [PATCH 151/152] libblkid/minix: Sanity check superblock s_state for v
+ 1 and 2
+
+Swap devices with specific values in the uuid can look like minix
+devices to blkid. Add an extra check to make sure the state of the
+filesystem has valid state flags.
+
+A couple of offending swap uuids include:
+35f1f264-137f-471a-bc85-acc9f4bc04a3
+35f1f264-7f13-471a-bc85-acc9f4bc04a3
+35f1f264-138f-471a-bc85-acc9f4bc04a3
+35f1f264-8f13-471a-bc85-acc9f4bc04a3
+
+Without this change a swap device with any of those uuids would be
+detected as minix and swap by blkid.
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1594681
+Upstream: http://github.com/karelzak/util-linux/commit/892553b1a41b449f58462f123eca2bf2c6c56b33
+Signed-off-by: Nate Clark <nate@neworld.us>
+---
+ libblkid/src/superblocks/minix.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libblkid/src/superblocks/minix.c b/libblkid/src/superblocks/minix.c
+index a20d51f2c..4e70fda8f 100644
+--- a/libblkid/src/superblocks/minix.c
++++ b/libblkid/src/superblocks/minix.c
+@@ -93,6 +93,10 @@ static int probe_minix(blkid_probe pr, const struct blkid_idmag *mag)
+ 		if (sb->s_imap_blocks == 0 || sb->s_zmap_blocks == 0)
+ 			return 1;
+ 
++		uint16_t state = minix_swab16(swabme, sb->s_state);
++		if ((state & (MINIX_VALID_FS | MINIX_ERROR_FS)) != state)
++			return 1;
++
+ 		zones = version == 2 ? minix_swab32(swabme, sb->s_zones) :
+ 				       minix_swab16(swabme, sb->s_nzones);
+ 		ninodes = minix_swab16(swabme, sb->s_ninodes);
+-- 
+2.14.4
+

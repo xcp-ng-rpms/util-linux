@@ -1,0 +1,114 @@
+From e8c8b5f97c864f0fd65378ccde0c45526e6916c9 Mon Sep 17 00:00:00 2001
+From: Sweet Tea Dorminy <sweettea@mit.edu>
+Date: Wed, 6 Dec 2017 18:26:59 -0500
+Subject: [PATCH 146/146] libblkid: Add VDO superblock information into blkid
+
+[kzak@redhat.com: - add tests/expected/blkid/low-probe-vdo
+                  - enlarge the image (must be > 1024)]
+
+[RHEL7: exclude vdo regression test doe to binary stuff in the patch]
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1521163
+Upstream: http://github.com/karelzak/util-linux/commit/6418cba457a701d44294d934c2bc4b766bbcfa2b
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libblkid/src/Makemodule.am             |   1 +
+ libblkid/src/superblocks/superblocks.c |   1 +
+ libblkid/src/superblocks/superblocks.h |   1 +
+ libblkid/src/superblocks/vdo.c         |  48 +++++++++++++++++++++++++++++++++
+ 4 files changed, 55 insertions(+)
+ create mode 100644 libblkid/src/superblocks/vdo.c
+
+diff --git a/libblkid/src/Makemodule.am b/libblkid/src/Makemodule.am
+index 15639768a..791d7cbe8 100644
+--- a/libblkid/src/Makemodule.am
++++ b/libblkid/src/Makemodule.am
+@@ -88,6 +88,7 @@ libblkid_la_SOURCES = \
+ 	libblkid/src/superblocks/ubifs.c \
+ 	libblkid/src/superblocks/udf.c \
+ 	libblkid/src/superblocks/ufs.c \
++	libblkid/src/superblocks/vdo.c \
+ 	libblkid/src/superblocks/vfat.c \
+ 	libblkid/src/superblocks/via_raid.c \
+ 	libblkid/src/superblocks/vmfs.c \
+diff --git a/libblkid/src/superblocks/superblocks.c b/libblkid/src/superblocks/superblocks.c
+index 3721544ff..8210fc17b 100644
+--- a/libblkid/src/superblocks/superblocks.c
++++ b/libblkid/src/superblocks/superblocks.c
+@@ -109,6 +109,7 @@ static const struct blkid_idinfo *idinfos[] =
+ 	&verity_hash_idinfo,
+ 	&luks_idinfo,
+ 	&vmfs_volume_idinfo,
++	&vdo_idinfo,
+ 
+ 	/* Filesystems */
+ 	&vfat_idinfo,
+diff --git a/libblkid/src/superblocks/superblocks.h b/libblkid/src/superblocks/superblocks.h
+index 90847151b..487fe38c2 100644
+--- a/libblkid/src/superblocks/superblocks.h
++++ b/libblkid/src/superblocks/superblocks.h
+@@ -72,6 +72,7 @@ extern const struct blkid_idinfo befs_idinfo;
+ extern const struct blkid_idinfo nilfs2_idinfo;
+ extern const struct blkid_idinfo exfat_idinfo;
+ extern const struct blkid_idinfo f2fs_idinfo;
++extern const struct blkid_idinfo vdo_idinfo;
+ 
+ /*
+  * superblock functions
+diff --git a/libblkid/src/superblocks/vdo.c b/libblkid/src/superblocks/vdo.c
+new file mode 100644
+index 000000000..bec686f4f
+--- /dev/null
++++ b/libblkid/src/superblocks/vdo.c
+@@ -0,0 +1,48 @@
++/*
++ * Copyright (C) 2017 Red Hat, Inc.
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <errno.h>
++#include <ctype.h>
++#include <stdint.h>
++
++#include "superblocks.h"
++
++struct vdo_super_block {
++	char magic[8];			/* magic number 'dmvdo001'*/
++	char unused[32];		/* 32 bytes of unimportant space */
++	unsigned char sb_uuid[16];	/* vdo unique id */
++
++	/* this is not all... but enough for libblkid */
++} __attribute__((packed));
++
++static int probe_vdo(blkid_probe pr, const struct blkid_idmag *mag)
++{
++	struct vdo_super_block *vsb;
++
++	vsb = blkid_probe_get_sb(pr, mag, struct vdo_super_block);
++	if (!vsb)
++		return errno ? -errno : 1;
++
++	blkid_probe_set_uuid(pr, vsb->sb_uuid);
++	return 0;
++}
++
++const struct blkid_idinfo vdo_idinfo =
++{
++	.name		= "vdo",
++	.usage		= BLKID_USAGE_OTHER,
++	.probefunc	= probe_vdo,
++	.magics		=
++	{
++		{ .magic = "dmvdo001", .len = 8 },
++		{ NULL }
++	}
++};
+-- 
+2.13.6
+

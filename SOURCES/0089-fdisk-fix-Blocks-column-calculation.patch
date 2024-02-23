@@ -1,0 +1,27 @@
+From acf8de63d2a797850935feeaf6bac2dd21c9b496 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Wed, 15 Mar 2017 13:23:56 +0100
+Subject: [PATCH 089/116] fdisk: fix Blocks column calculation
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1344102
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ fdisks/fdiskdoslabel.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fdisks/fdiskdoslabel.c b/fdisks/fdiskdoslabel.c
+index b7eb35a..6375692 100644
+--- a/fdisks/fdiskdoslabel.c
++++ b/fdisks/fdiskdoslabel.c
+@@ -1202,7 +1202,7 @@ int dos_list_table(struct fdisk_context *cxt,
+ 		p = pe->part_table;
+ 		if (p && !is_cleared_partition(p)) {
+ 			unsigned int psects = get_nr_sects(p);
+-			unsigned int pblocks = psects;
++			unsigned long pblocks = psects;
+ 			unsigned int podd = 0;
+ 			struct fdisk_parttype *type =
+ 					fdisk_get_parttype_from_code(cxt, p->sys_ind);
+-- 
+2.9.3
+

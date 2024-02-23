@@ -1,0 +1,17 @@
+diff -up util-linux-2.23.2/login-utils/su-common.c.kzak util-linux-2.23.2/login-utils/su-common.c
+--- util-linux-2.23.2/login-utils/su-common.c.kzak	2015-06-24 11:14:25.102395082 +0200
++++ util-linux-2.23.2/login-utils/su-common.c	2015-06-24 11:22:20.472859684 +0200
+@@ -359,10 +359,9 @@ create_watching_parent (void)
+       if (pid != (pid_t)-1)
+ 	if (WIFSIGNALED (status))
+ 	  {
+-	    status = WTERMSIG (status) + 128;
+-	    if (WCOREDUMP (status))
+-	      fprintf (stderr, _("%s (core dumped)\n"),
+-                 strsignal (WTERMSIG (status)));
++            fprintf (stderr, "%s%s\n", strsignal (WTERMSIG (status)),
++                     WCOREDUMP (status) ? _(" (core dumped)") : "");
++            status = WTERMSIG (status) + 128;
+ 	  }
+ 	else
+ 	  status = WEXITSTATUS (status);

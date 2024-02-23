@@ -1,0 +1,176 @@
+diff -up util-linux-2.23.2/include/pathnames.h.kzak util-linux-2.23.2/include/pathnames.h
+--- util-linux-2.23.2/include/pathnames.h.kzak	2013-07-30 10:39:26.201738190 +0200
++++ util-linux-2.23.2/include/pathnames.h	2013-09-12 13:05:35.928359383 +0200
+@@ -63,6 +63,7 @@
+ 
+ /* used in term-utils/agetty.c */
+ #define _PATH_ISSUE		"/etc/issue"
++#define _PATH_OS_RELEASE	"/etc/os-release"
+ #define _PATH_NUMLOCK_ON	_PATH_LOCALSTATEDIR "/numlock-on"
+ 
+ #define _PATH_LOGINDEFS		"/etc/login.defs"
+diff -up util-linux-2.23.2/term-utils/agetty.8.kzak util-linux-2.23.2/term-utils/agetty.8
+--- util-linux-2.23.2/term-utils/agetty.8.kzak	2013-07-30 10:58:20.889261333 +0200
++++ util-linux-2.23.2/term-utils/agetty.8	2013-09-12 13:05:35.928359383 +0200
+@@ -310,6 +310,14 @@ Insert the current date.
+ .TP
+ s
+ Insert the system name, the name of the operating system. Same as `uname \-s'.
++See also \\S escape code.
++.TP
++S or S{VARIABLE}
++Insert the VARIABLE data from \fI/etc/os-release\fP.  If the VARIABLE argument
++is not specified then use PRETTY_NAME from the file or the system name (see \\s).
++This escape code allows to keep \fI/etc/issue\fP distribution and release
++independent.  Note that \\S{ANSI_COLOR} is converted to the real terminal
++escape sequence.
+ .TP
+ l
+ Insert the name of the current tty line.
+@@ -368,11 +376,14 @@ the system status file.
+ .B /etc/issue
+ printed before the login prompt.
+ .TP
++.B /etc/os-release
++operating system identification data.
++.TP
+ .B /dev/console
+ problem reports (if syslog(3) is not used).
+ .TP
+ .B /etc/inittab
+-\fIinit\fP(8) configuration file.
++\fIinit\fP(8) configuration file for SysV-style init daemon.
+ .SH BUGS
+ .ad
+ .fi
+diff -up util-linux-2.23.2/term-utils/agetty.c.kzak util-linux-2.23.2/term-utils/agetty.c
+--- util-linux-2.23.2/term-utils/agetty.c.kzak	2013-09-12 13:05:35.927359379 +0200
++++ util-linux-2.23.2/term-utils/agetty.c	2013-09-12 13:05:35.929359388 +0200
+@@ -129,6 +129,7 @@ struct options {
+ 	char *issue;			/* alternative issue file */
+ 	char *erasechars;		/* string with erase chars */
+ 	char *killchars;		/* string with kill chars */
++	char *osrelease;		/* /etc/os-release data */
+ 	int delay;			/* Sleep seconds before prompt */
+ 	int nice;			/* Run login with this priority */
+ 	int numspeed;			/* number of baud rates to try */
+@@ -431,7 +432,8 @@ int main(int argc, char **argv)
+ 			log_warn(_("%s: can't change process priority: %m"),
+ 				options.tty);
+ 	}
+-
++	if (options.osrelease)
++		free(options.osrelease);
+ #ifdef DEBUGGING
+ 	fprintf(dbf, "read %c\n", ch);
+ 	if (close_stream(dbf) != 0)
+@@ -1279,6 +1281,84 @@ static char *xgetdomainname(void)
+ 	return NULL;
+ }
+ 
++static char *read_os_release(struct options *op, const char *varname)
++{
++	int fd = -1;
++	struct stat st;
++	size_t varsz = strlen(varname);
++	char *p, *buf = NULL, *ret = NULL;
++
++	/* read the file only once */
++	if (!op->osrelease) {
++		fd = open(_PATH_OS_RELEASE, O_RDONLY);
++		if (fd == -1) {
++			log_warn(_("cannot open: %s: %m"), _PATH_OS_RELEASE);
++			return NULL;
++		}
++
++		if (fstat(fd, &st) < 0 || st.st_size > 4 * 1024 * 1024)
++			goto done;
++
++		op->osrelease = malloc(st.st_size + 1);
++		if (!op->osrelease)
++			log_err(_("failed to allocate memory: %m"));
++		if (read_all(fd, op->osrelease, st.st_size) != (ssize_t) st.st_size) {
++			free(op->osrelease);
++			op->osrelease = NULL;
++			goto done;
++		}
++		op->osrelease[st.st_size] = 0;
++	}
++	buf = strdup(op->osrelease);
++	if (!buf)
++		log_err(_("failed to allocate memory: %m"));
++	p = buf;
++
++	for (;;) {
++		char *eol, *eon;
++
++		p += strspn(p, "\n\r");
++		p += strspn(p, " \t\n\r");
++		if (!*p)
++			break;
++		if (strspn(p, "#;\n") != 0) {
++			p += strcspn(p, "\n\r");
++			continue;
++		}
++		if (strncmp(p, varname, varsz) != 0) {
++			p += strcspn(p, "\n\r");
++			continue;
++		}
++		p += varsz;
++		p += strspn(p, " \t\n\r=\"");
++		eol = p + strcspn(p, "\n\r");
++		*eol = '\0';
++		eon = eol-1;
++		while (eon > p) {
++			if (*eon == '\t' || *eon == ' ') {
++				eon--;
++				continue;
++			}
++			if (*eon == '"') {
++				*eon = '\0';
++				break;
++			}
++			break;
++		}
++		if (ret)
++			free(ret);
++		ret = strdup(p);
++		if (!ret)
++			log_err(_("failed to allocate memory: %m"));
++		p = eol + 1;
++	}
++done:
++	free(buf);
++	if (fd >= 0)
++		close(fd);
++	return ret;
++}
++
+ /* Show login prompt, optionally preceded by /etc/issue contents. */
+ static void do_prompt(struct options *op, struct termios *tp)
+ {
+@@ -1968,6 +2048,24 @@ static void output_special_char(unsigned
+ 		}
+ 		break;
+ 	}
++	case 'S':
++	{
++		char *var = NULL, varname[64];
++
++		if (get_escape_argument(fp, varname, sizeof(varname)))
++			var = read_os_release(op, varname);
++		else if (!(var = read_os_release(op, "PRETTY_NAME")))
++			var = uts.sysname;
++		if (var) {
++			if (strcmp(varname, "ANSI_COLOR") == 0)
++				printf("\033[%sm", var);
++			else
++				printf("%s", var);
++			if (var != uts.sysname)
++				free(var);
++		}
++		break;
++	}
+ 	case 'u':
+ 	case 'U':
+ 	{

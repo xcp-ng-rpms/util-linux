@@ -1,0 +1,79 @@
+From 70ed51ccc2e8e6c4976d422af960e4232210fb99 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 16 Oct 2017 13:31:47 +0200
+Subject: [PATCH 134/135] logger: do not rely only getlogin(3) telling who ran
+ the command
+
+The getlogin(3) is known not to always work, and when that happens it
+is reasonable to try determine user of name by looking process owner
+and passwd information.
+
+Upstream: http://github.com/karelzak/util-linux/commit/019b97024fde3f07eaf541eef990762483369a11
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1336432
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ misc-utils/logger.c | 25 ++++++++++++++++---------
+ 1 file changed, 16 insertions(+), 9 deletions(-)
+
+diff --git a/misc-utils/logger.c b/misc-utils/logger.c
+index dfda01866..c1cec45e8 100644
+--- a/misc-utils/logger.c
++++ b/misc-utils/logger.c
+@@ -49,6 +49,8 @@
+ #include <arpa/inet.h>
+ #include <netdb.h>
+ #include <getopt.h>
++#include <sys/types.h>
++#include <pwd.h>
+ 
+ #include "c.h"
+ #include "closestream.h"
+@@ -183,9 +185,20 @@ inet_socket(const char *servername, const char *port, const int socket_type)
+ 	return fd;
+ }
+ 
++static char const *xgetlogin(void)
++{
++	char const *cp;
++	struct passwd *pw;
++
++	if (!(cp = getlogin()) || !*cp)
++		cp = (pw = getpwuid(geteuid()))? pw->pw_name : "<someone>";
++	return cp;
++}
++
+ static void
+ mysyslog(int fd, int logflags, int pri, char *tag, char *msg) {
+-       char *buf, pid[30], *cp, *tp;
++       char *buf, pid[30], *tp;
++       const char *cp;
+        time_t now;
+ 
+        if (fd > -1) {
+@@ -193,13 +206,7 @@ mysyslog(int fd, int logflags, int pri, char *tag, char *msg) {
+                        snprintf (pid, sizeof(pid), "[%d]", getpid());
+ 	       else
+ 		       pid[0] = 0;
+-               if (tag)
+-		       cp = tag;
+-	       else {
+-		       cp = getlogin();
+-		       if (!cp)
+-			       cp = "<someone>";
+-	       }
++	       cp = tag ? tag : xgetlogin();
+                (void)time(&now);
+ 	       tp = ctime(&now)+4;
+ 
+@@ -334,7 +341,7 @@ main(int argc, char **argv) {
+ 	else if (usock)
+ 		LogSock = unix_socket(usock, socket_type);
+ 	else
+-		openlog(tag ? tag : getlogin(), logflags, 0);
++		openlog(tag ? tag : xgetlogin(), logflags, 0);
+ 
+ 	buf = xcalloc(1, max_message_size);
+ 
+-- 
+2.13.6
+

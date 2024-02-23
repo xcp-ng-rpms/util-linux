@@ -1,0 +1,28 @@
+From 92da0dea47ffceffb4a049a0a1094e41e212ceee Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 9 Feb 2017 11:21:49 +0100
+Subject: [PATCH 098/116] umount: exclude selinuxfs from --all
+
+Upstream: https://github.com/karelzak/util-linux/commit/9e66fd30d7bfbd7279db6100830aa9045d0255ca
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1417722
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/umount.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sys-utils/umount.c b/sys-utils/umount.c
+index 9c47744..48483dc 100644
+--- a/sys-utils/umount.c
++++ b/sys-utils/umount.c
+@@ -605,7 +605,7 @@ int main(int argc, char **argv)
+ 
+ 	if (all) {
+ 		if (!types)
+-			types = "noproc,nodevfs,nodevpts,nosysfs,norpc_pipefs,nonfsd";
++			types = "noproc,nodevfs,nodevpts,nosysfs,norpc_pipefs,nonfsd,noselinuxfs";
+ 
+ 		mnt_context_set_fstype_pattern(cxt, types);
+ 		rc = umount_all(cxt);
+-- 
+2.9.3
+

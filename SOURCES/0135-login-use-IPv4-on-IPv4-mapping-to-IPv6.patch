@@ -1,0 +1,52 @@
+From 7a1a825c7b77785f256e05b1e3ac7676c7485a5c Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 4 Jul 2017 12:50:39 +0200
+Subject: [PATCH 135/135] login: use IPv4 on IPv4-mapping-to-IPv6
+
+It seems that on some systems (e.g. RHEL7) the libc function
+getaddrinfo() is not able to translate ::ffff: address to IPv4. The
+result is 0.0.0.0 host address in the last(1) and utmpdump(1) output.
+
+ /sbin/login -h "::ffff:192.168.1.7"
+
+utmpdump:
+
+  [7] [03926] [1   ] [user1   ] [pts/1       ] [::ffff:192.168.1.7  ] [0.0.0.0        ] [Thu May 12 17:49:50 2016    ]
+
+Not sure if this is about order of the getaddrinfo() results, system
+configuration or libc version. It's irrelevant for login(1). We have
+to be robust enough to write usable address to log files everywhere.
+
+The solution is to detect IPv4-mapping-to-IPv6 and use IPv4 for utmp.
+
+Upstream: http://github.com/karelzak/util-linux/commit/1c8792f1ae7fa38cf1d4418ad99c207f65dfdb1a
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1296233
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ login-utils/login.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/login-utils/login.c b/login-utils/login.c
+index e0e960f88..5c36953ef 100644
+--- a/login-utils/login.c
++++ b/login-utils/login.c
+@@ -1101,8 +1101,15 @@ static void init_remote_info(struct login_context *cxt, char *remotehost)
+ 		} else if (info->ai_family == AF_INET6) {
+ 			struct sockaddr_in6 *sa =
+ 				     (struct sockaddr_in6 *) info->ai_addr;
++#ifdef IN6_IS_ADDR_V4MAPPED
++			if (IN6_IS_ADDR_V4MAPPED(&sa->sin6_addr)) {
++				const uint8_t *bytes = sa->sin6_addr.s6_addr;
++				struct in_addr addr = { *(const in_addr_t *) (bytes + 12) };
+ 
+-			memcpy(cxt->hostaddress, &(sa->sin6_addr), sizeof(sa->sin6_addr));
++				memcpy(cxt->hostaddress, &addr, sizeof(struct in_addr));
++			} else
++#endif
++				memcpy(cxt->hostaddress, &(sa->sin6_addr), sizeof(sa->sin6_addr));
+ 		}
+ 		freeaddrinfo(info);
+ 	}
+-- 
+2.13.6
+

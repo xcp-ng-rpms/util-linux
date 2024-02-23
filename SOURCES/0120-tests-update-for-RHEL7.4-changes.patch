@@ -1,0 +1,209 @@
+From e5d31b4ffb3f978a8935d35301a59eeafe6a50d4 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 4 Apr 2017 11:58:09 +0200
+Subject: [PATCH 120/121] tests: update for RHEL7.4 changes
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1360764
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1344726
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1402183
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ lib/Makemodule.am                            | 1 +
+ tests/expected/fdisk/gpt                     | 5 +++++
+ tests/expected/lscpu/lscpu-armv7             | 5 +++++
+ tests/expected/lscpu/lscpu-s390-kvm          | 2 ++
+ tests/expected/lscpu/lscpu-s390-lpar         | 2 ++
+ tests/expected/lscpu/lscpu-s390-zvm          | 2 ++
+ tests/expected/lscpu/lscpu-x86_64-64cpu      | 5 ++++-
+ tests/expected/lscpu/lscpu-x86_64-dell_e4310 | 5 ++++-
+ tests/ts/fdisk/gpt                           | 3 ++-
+ 9 files changed, 27 insertions(+), 3 deletions(-)
+
+diff --git a/lib/Makemodule.am b/lib/Makemodule.am
+index faf9d74..acae27a 100644
+--- a/lib/Makemodule.am
++++ b/lib/Makemodule.am
+@@ -82,6 +82,7 @@ test_ismounted_LDADD = libcommon.la
+ 
+ test_wholedisk_SOURCES = lib/wholedisk.c
+ test_wholedisk_CFLAGS = -DTEST_PROGRAM
++test_wholedisk_LDADD = libcommon.la
+ 
+ test_mangle_SOURCES = lib/mangle.c
+ test_mangle_CFLAGS = -DTEST_PROGRAM
+diff --git a/tests/expected/fdisk/gpt b/tests/expected/fdisk/gpt
+index b73d5c3..017d819 100644
+--- a/tests/expected/fdisk/gpt
++++ b/tests/expected/fdisk/gpt
+@@ -7,6 +7,7 @@ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+ I/O size (minimum/optimal): 512 bytes / 512 bytes
+ Disk label type: gpt
++Disk identifier: <removed>
+ 
+ 
+ #         Start          End    Size  Type            Name
+@@ -21,6 +22,7 @@ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+ I/O size (minimum/optimal): 512 bytes / 512 bytes
+ Disk label type: gpt
++Disk identifier: <removed>
+ 
+ 
+ #         Start          End    Size  Type            Name
+@@ -42,6 +44,7 @@ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+ I/O size (minimum/optimal): 512 bytes / 512 bytes
+ Disk label type: gpt
++Disk identifier: <removed>
+ 
+ 
+ #         Start          End    Size  Type            Name
+@@ -63,6 +66,7 @@ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+ I/O size (minimum/optimal): 512 bytes / 512 bytes
+ Disk label type: gpt
++Disk identifier: <removed>
+ 
+ 
+ #         Start          End    Size  Type            Name
+@@ -83,6 +87,7 @@ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+ I/O size (minimum/optimal): 512 bytes / 512 bytes
+ Disk label type: gpt
++Disk identifier: <removed>
+ 
+ 
+ #         Start          End    Size  Type            Name
+diff --git a/tests/expected/lscpu/lscpu-armv7 b/tests/expected/lscpu/lscpu-armv7
+index a1b691c..bcb16cc 100644
+--- a/tests/expected/lscpu/lscpu-armv7
++++ b/tests/expected/lscpu/lscpu-armv7
+@@ -3,6 +3,11 @@ On-line CPU(s) list:   0,1
+ Thread(s) per core:    1
+ Core(s) per socket:    2
+ Socket(s):             1
++Model:                 4
++CPU max MHz:           1700.0000
++CPU min MHz:           200.0000
++BogoMIPS:              1694.10
++Flags:                 swp half thumb fastmult vfp edsp thumbee neon vfpv3 tls vfpv4 idiva idivt
+ 
+ # The following is the parsable format, which can be fed to other
+ # programs. Each different item in every column has an unique ID
+diff --git a/tests/expected/lscpu/lscpu-s390-kvm b/tests/expected/lscpu/lscpu-s390-kvm
+index 1aa42f9..66d1c04 100644
+--- a/tests/expected/lscpu/lscpu-s390-kvm
++++ b/tests/expected/lscpu/lscpu-s390-kvm
+@@ -6,11 +6,13 @@ Core(s) per socket:    1
+ Socket(s) per book:    1
+ Book(s):               3
+ Vendor ID:             IBM/S390
++Machine type:          2817
+ BogoMIPS:              14367.00
+ Hypervisor:            KVM/Linux
+ Hypervisor vendor:     KVM
+ Virtualization type:   full
+ Dispatching mode:      horizontal
++Flags:                 esan3 zarch stfle msa ldisp eimm dfp edat etf3eh highgprs
+ 
+ # The following is the parsable format, which can be fed to other
+ # programs. Each different item in every column has an unique ID
+diff --git a/tests/expected/lscpu/lscpu-s390-lpar b/tests/expected/lscpu/lscpu-s390-lpar
+index 0799ab9..9c8ac2c 100644
+--- a/tests/expected/lscpu/lscpu-s390-lpar
++++ b/tests/expected/lscpu/lscpu-s390-lpar
+@@ -7,11 +7,13 @@ Core(s) per socket:    4
+ Socket(s) per book:    6
+ Book(s):               4
+ Vendor ID:             IBM/S390
++Machine type:          2817
+ BogoMIPS:              14367.00
+ Hypervisor:            PR/SM
+ Hypervisor vendor:     IBM
+ Virtualization type:   full
+ Dispatching mode:      vertical
++Flags:                 esan3 zarch stfle msa ldisp eimm dfp etf3eh highgprs
+ 
+ # The following is the parsable format, which can be fed to other
+ # programs. Each different item in every column has an unique ID
+diff --git a/tests/expected/lscpu/lscpu-s390-zvm b/tests/expected/lscpu/lscpu-s390-zvm
+index 04dcf76..4cd6b8f 100644
+--- a/tests/expected/lscpu/lscpu-s390-zvm
++++ b/tests/expected/lscpu/lscpu-s390-zvm
+@@ -6,11 +6,13 @@ Core(s) per socket:    1
+ Socket(s) per book:    1
+ Book(s):               4
+ Vendor ID:             IBM/S390
++Machine type:          2817
+ BogoMIPS:              14367.00
+ Hypervisor:            z/VM 6.1.0
+ Hypervisor vendor:     IBM
+ Virtualization type:   full
+ Dispatching mode:      horizontal
++Flags:                 esan3 zarch stfle msa ldisp eimm dfp etf3eh highgprs
+ 
+ # The following is the parsable format, which can be fed to other
+ # programs. Each different item in every column has an unique ID
+diff --git a/tests/expected/lscpu/lscpu-x86_64-64cpu b/tests/expected/lscpu/lscpu-x86_64-64cpu
+index 32aa57c..07990ea 100644
+--- a/tests/expected/lscpu/lscpu-x86_64-64cpu
++++ b/tests/expected/lscpu/lscpu-x86_64-64cpu
+@@ -11,7 +11,9 @@ Model:                 46
+ Model name:            Intel(R) Xeon(R) CPU           X7550  @ 2.00GHz
+ Stepping:              6
+ CPU MHz:               1064.000
+-BogoMIPS:              3989.44
++CPU max MHz:           1996.0000
++CPU min MHz:           1064.0000
++BogoMIPS:              3990.31
+ Virtualization:        VT-x
+ L1d cache:             32K
+ L1i cache:             32K
+@@ -20,6 +22,7 @@ L3 cache:              18432K
+ NUMA node0 CPU(s):     0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,60,62
+ NUMA node2 CPU(s):     1,5,9,13,17,21,25,29,33,37,41,45,49,53,57,61
+ NUMA node3 CPU(s):     3,7,11,15,19,23,27,31,35,39,43,47,51,55,59,63
++Flags:                 fpu vme de pse tsc msr pae mce cx8 apic mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx rdtscp lm constant_tsc arch_perfmon pebs bts rep_good xtopology nonstop_tsc aperfmperf pni dtes64 monitor ds_cpl vmx est tm2 ssse3 cx16 xtpr pdcm dca sse4_1 sse4_2 x2apic popcnt lahf_lm ida epb dts tpr_shadow vnmi flexpriority ept vpid
+ 
+ # The following is the parsable format, which can be fed to other
+ # programs. Each different item in every column has an unique ID
+diff --git a/tests/expected/lscpu/lscpu-x86_64-dell_e4310 b/tests/expected/lscpu/lscpu-x86_64-dell_e4310
+index a81878d..39ec32c 100644
+--- a/tests/expected/lscpu/lscpu-x86_64-dell_e4310
++++ b/tests/expected/lscpu/lscpu-x86_64-dell_e4310
+@@ -11,13 +11,16 @@ Model:                 37
+ Model name:            Intel(R) Core(TM) i5 CPU       M 560  @ 2.67GHz
+ Stepping:              5
+ CPU MHz:               1199.000
+-BogoMIPS:              5319.97
++CPU max MHz:           2667.0000
++CPU min MHz:           1199.0000
++BogoMIPS:              5319.92
+ Virtualization:        VT-x
+ L1d cache:             32K
+ L1i cache:             32K
+ L2 cache:              256K
+ L3 cache:              3072K
+ NUMA node0 CPU(s):     0-3
++Flags:                 fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 cx16 xtpr pdcm sse4_1 sse4_2 popcnt aes lahf_lm ida arat dts tpr_shadow vnmi flexpriority ept vpid
+ 
+ # The following is the parsable format, which can be fed to other
+ # programs. Each different item in every column has an unique ID
+diff --git a/tests/ts/fdisk/gpt b/tests/ts/fdisk/gpt
+index a0902ca..ec3438f 100755
+--- a/tests/ts/fdisk/gpt
++++ b/tests/ts/fdisk/gpt
+@@ -38,7 +38,8 @@ function print_layout {
+ 	echo -ne "\n---layout----------" >> $TS_OUTPUT
+ 	$TS_CMD_FDISK -l ${TEST_IMAGE_NAME} 2> /dev/null | \
+ 		sed 's/^.*\.img/__ts_dev__/g;
+-		     s/^[[:blank:]]*Device Boot/     Device Boot/g' >> $TS_OUTPUT 2>&1
++		     s/^[[:blank:]]*Device Boot/     Device Boot/g;
++		     s/^Disk identifier:.*/Disk identifier: <removed>/g' >> $TS_OUTPUT 2>&1
+ 	echo -ne   "-------------------\n\n" >> $TS_OUTPUT
+ }
+ 
+-- 
+2.9.3
+

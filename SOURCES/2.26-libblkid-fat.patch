@@ -1,0 +1,113 @@
+diff -up util-linux-2.23.2/libblkid/src/partitions/dos.c.kzak util-linux-2.23.2/libblkid/src/partitions/dos.c
+--- util-linux-2.23.2/libblkid/src/partitions/dos.c.kzak	2015-08-21 10:16:45.244332027 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/dos.c	2015-08-21 10:22:07.181340367 +0200
+@@ -151,16 +151,6 @@ static int probe_dos_pt(blkid_probe pr,
+ 	if (memcmp(data, BLKID_AIX_MAGIC_STRING, BLKID_AIX_MAGIC_STRLEN) == 0)
+ 		goto nothing;
+ 
+-	/*
+-	 * Now that the 55aa signature is present, this is probably
+-	 * either the boot sector of a FAT filesystem or a DOS-type
+-	 * partition table.
+-	 */
+-	if (blkid_probe_is_vfat(pr) == 1) {
+-		DBG(LOWPROBE, blkid_debug("probably FAT -- ignore"));
+-		goto nothing;
+-	}
+-
+ 	p0 = (struct dos_partition *) (data + BLKID_MSDOS_PT_OFFSET);
+ 
+ 	/*
+@@ -182,6 +172,16 @@ static int probe_dos_pt(blkid_probe pr,
+ 		}
+ 	}
+ 
++	/*
++	 * Now that the 55aa signature is present, this is probably
++	 * either the boot sector of a FAT filesystem or a DOS-type
++	 * partition table.
++	 */
++	if (blkid_probe_is_vfat(pr) == 1) {
++		DBG(LOWPROBE, blkid_debug("probably FAT -- ignore"));
++		goto nothing;
++	}
++
+ 	blkid_probe_use_wiper(pr, BLKID_MSDOS_PT_OFFSET,
+ 				  512 - BLKID_MSDOS_PT_OFFSET);
+ 
+diff -up util-linux-2.23.2/libblkid/src/partitions/dos.h.kzak util-linux-2.23.2/libblkid/src/partitions/dos.h
+--- util-linux-2.23.2/libblkid/src/partitions/dos.h.kzak	2015-08-21 10:34:14.919380422 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/dos.h	2015-08-21 10:35:45.221807669 +0200
+@@ -12,6 +12,12 @@ struct dos_partition {
+ 
+ #define BLKID_MSDOS_PT_OFFSET		0x1be
+ 
++static inline struct dos_partition *mbr_get_partition(unsigned char *mbr, int i)
++{
++	return (struct dos_partition *)
++		(mbr + BLKID_MSDOS_PT_OFFSET + (i * sizeof(struct dos_partition)));
++}
++
+ /* assemble badly aligned little endian integer */
+ static inline unsigned int assemble4le(const unsigned char *p)
+ {
+diff -up util-linux-2.23.2/libblkid/src/superblocks/vfat.c.kzak util-linux-2.23.2/libblkid/src/superblocks/vfat.c
+--- util-linux-2.23.2/libblkid/src/superblocks/vfat.c.kzak	2015-08-21 10:10:12.111906711 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/vfat.c	2015-08-21 10:35:07.733045452 +0200
+@@ -16,6 +16,7 @@
+ #include <ctype.h>
+ #include <stdint.h>
+ 
++#include "partitions/dos.h"
+ #include "superblocks.h"
+ 
+ /* Yucky misaligned values */
+@@ -169,7 +170,8 @@ static unsigned char *search_fat_label(b
+ 	return NULL;
+ }
+ 
+-static int fat_valid_superblock(const struct blkid_idmag *mag,
++static int fat_valid_superblock(blkid_probe pr,
++			const struct blkid_idmag *mag,
+ 			struct msdos_super_block *ms,
+ 			struct vfat_super_block *vs,
+ 			uint32_t *cluster_count, uint32_t *fat_size)
+@@ -243,6 +245,20 @@ static int fat_valid_superblock(const st
+ 	if (cluster_count)
+ 		*cluster_count = __cluster_count;
+ 
++	if (blkid_probe_is_wholedisk(pr)) {
++		/* OK, seems like FAT, but it's possible that we found boot
++		 * sector with crazy FAT-like stuff (magic strings, media,
++		 * etc..) before MBR. Let's make sure that there is no MBR with
++		 * usable partition. */
++		unsigned char *buf = (unsigned char *) ms;
++		if (is_valid_mbr_signature(buf)) {
++			struct dos_partition *p0 = mbr_get_partition(buf, 0);
++			if (dos_partition_size(p0) != 0 &&
++			    (p0->boot_ind == 0 || p0->boot_ind == 0x80))
++				return 0;
++		}
++	}
++
+ 	return 1;	/* valid */
+ }
+ 
+@@ -270,7 +286,7 @@ int blkid_probe_is_vfat(blkid_probe pr)
+ 	if (!vs)
+ 		return errno ? -errno : 0;
+ 
+-	return fat_valid_superblock(mag, ms, vs, NULL, NULL);
++	return fat_valid_superblock(pr, mag, ms, vs, NULL, NULL);
+ }
+ 
+ /* FAT label extraction from the root directory taken from Kay
+@@ -293,7 +309,7 @@ static int probe_vfat(blkid_probe pr, co
+ 	if (!vs)
+ 		return errno ? -errno : 1;
+ 
+-	if (!fat_valid_superblock(mag, ms, vs, &cluster_count, &fat_size))
++	if (!fat_valid_superblock(pr, mag, ms, vs, &cluster_count, &fat_size))
+ 		return 1;
+ 
+ 	sector_size = unaligned_le16(&ms->ms_sector_size);

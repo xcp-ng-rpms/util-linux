@@ -1,0 +1,31 @@
+From 19b9d9197374c5811e32777ca70a32eef37a1fb0 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 7 Jan 2016 13:23:24 +0100
+Subject: [PATCH 65/84] hwclock: change audit message
+
+The preferred layout is name=value for audit messages.
+
+Upstream: http://github.com/karelzak/util-linux/commit/fbed7e09f826e7804e99522cc1dd3cf54c9cdb67
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1296521
+References: https://bugzilla.redhat.com/show_bug.cgi?id=1296278
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/hwclock.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sys-utils/hwclock.c b/sys-utils/hwclock.c
+index c7789c8..ac9294b 100644
+--- a/sys-utils/hwclock.c
++++ b/sys-utils/hwclock.c
+@@ -1939,7 +1939,7 @@ void __attribute__((__noreturn__)) hwaudit_exit(int status)
+ {
+ 	if (hwaudit_on) {
+ 		audit_log_user_message(hwaudit_fd, AUDIT_USYS_CONFIG,
+-				       "changing system time", NULL, NULL, NULL,
++				       "op=change-system-time", NULL, NULL, NULL,
+ 				       status ? 0 : 1);
+ 		close(hwaudit_fd);
+ 	}
+-- 
+2.7.4
+

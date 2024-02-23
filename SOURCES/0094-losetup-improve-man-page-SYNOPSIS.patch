@@ -1,0 +1,42 @@
+From 38899e30a9a195adb4732185ed62d55a03ecc96d Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Fri, 17 Mar 2017 14:02:39 +0100
+Subject: [PATCH 094/116] losetup: improve man page SYNOPSIS
+
+and remove obsolete "-p fd" from the man page.
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1369436
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/losetup.8 | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/sys-utils/losetup.8 b/sys-utils/losetup.8
+index bd73518..9a8c1d5 100644
+--- a/sys-utils/losetup.8
++++ b/sys-utils/losetup.8
+@@ -37,7 +37,7 @@ Print name of first unused loop device:
+ .B "losetup \-f"
+ .sp
+ .in -5
+-Setup loop device:
++Set up a loop device:
+ .sp
+ .in +5
+ .B losetup
+@@ -46,10 +46,8 @@ Setup loop device:
+ .RB [ \-\-sizelimit
+ .IR size ]
+ .in +8
+-.RB [ \-p
+-.IR pfd ]
+-.RB [ \-rP ]
+-.RB { \-f [ \-\-show ]| \fIloopdev\fP }
++.RB [ \-Pr ]
++.RB [ \-\-show ]  " \-f" | \fIloopdev\fP
+ .I file
+ .sp
+ .in -13
+-- 
+2.9.3
+

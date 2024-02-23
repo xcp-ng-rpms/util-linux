@@ -1,0 +1,58 @@
+From e86fe103accdf5dd688b3710c873094cfa41ae5f Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 21 Mar 2017 15:11:29 +0100
+Subject: [PATCH 116/116] fdisk: use sysfs_devno_is_wholedisk()
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1402183
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ lib/wholedisk.c | 23 ++++++++---------------
+ 1 file changed, 8 insertions(+), 15 deletions(-)
+
+diff --git a/lib/wholedisk.c b/lib/wholedisk.c
+index 5161a1e..7c63204 100644
+--- a/lib/wholedisk.c
++++ b/lib/wholedisk.c
+@@ -1,14 +1,10 @@
+-/*
+- * No copyright is claimed.  This code is in the public domain; do with
+- * it what you wish.
+- *
+- * Written by Karel Zak <kzak@redhat.com>
+- */
++
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <ctype.h>
+ 
+ #include "blkdev.h"
++#include "sysfs.h"
+ #include "wholedisk.h"
+ 
+ int is_whole_disk_fd(int fd, const char *name)
+@@ -35,16 +31,13 @@ int is_whole_disk_fd(int fd, const char *name)
+ 
+ int is_whole_disk(const char *name)
+ {
+-	int fd = -1, res = 0;
+-#ifdef HDIO_GETGEO
+-	fd = open(name, O_RDONLY|O_CLOEXEC);
+-	if (fd != -1)
+-#endif
+-		res = is_whole_disk_fd(fd, name);
++	dev_t devno = sysfs_devname_to_devno(name, NULL);
++
++	if (sysfs_devno_is_lvm_private(devno) ||
++	    sysfs_devno_is_wholedisk(devno) <= 0)
++		return 0;
+ 
+-	if (fd != -1)
+-		close(fd);
+-	return res;
++	return 1;
+ }
+ 
+ #ifdef TEST_PROGRAM
+-- 
+2.9.3
+

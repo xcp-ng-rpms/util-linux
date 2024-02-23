@@ -1,0 +1,24 @@
+diff -up util-linux-2.23.2/libmount/src/context_umount.c.kzak util-linux-2.23.2/libmount/src/context_umount.c
+--- util-linux-2.23.2/libmount/src/context_umount.c.kzak	2013-10-07 11:43:10.990598629 +0200
++++ util-linux-2.23.2/libmount/src/context_umount.c	2013-10-07 11:46:01.051031431 +0200
+@@ -423,6 +423,8 @@ static int evaluate_permissions(struct l
+ 		if (optstr && !mnt_optstr_get_option(optstr,
+ 					"user", &mtab_user, &sz) && sz)
+ 			ok = !strncmp(curr_user, mtab_user, sz);
++
++		free(curr_user);
+ 	}
+ 
+ 	if (ok) {
+diff -up util-linux-2.23.2/libmount/src/utils.c.kzak util-linux-2.23.2/libmount/src/utils.c
+--- util-linux-2.23.2/libmount/src/utils.c.kzak	2013-07-30 11:15:27.391515623 +0200
++++ util-linux-2.23.2/libmount/src/utils.c	2013-10-07 11:43:27.209924834 +0200
+@@ -159,7 +159,7 @@ int mnt_chdir_to_parent(const char *targ
+ 		if (!last || !*last)
+ 			memcpy(*filename, ".", 2);
+ 		else
+-			memcpy(*filename, last, strlen(last) + 1);
++			memmove(*filename, last, strlen(last) + 1);
+ 	} else
+ 		free(buf);
+ 	return 0;

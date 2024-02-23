@@ -1,0 +1,207 @@
+From e3cfe198ebff9721efe6dd063da4b7b2dfe1d8b9 Mon Sep 17 00:00:00 2001
+From: Denis Chaplygin <dchaplyg@redhat.com>
+Date: Tue, 31 Jan 2017 12:51:28 +0100
+Subject: [PATCH 105/116] fallocate: Added posix_fallocate() support.
+
+No all filesystems support Linux fallocate. The new option allow use
+posix implementation if necessary.
+
+Upstream: https://github.com/karelzak/util-linux/commit/833f9a7aae713278eec5f85266597482f18c7370
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1416467
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ AUTHORS               |  1 +
+ configure.ac          | 28 ++++++++++++++++++++++++++++
+ sys-utils/fallocate.1 | 10 ++++++++++
+ sys-utils/fallocate.c | 44 ++++++++++++++++++++++++++++++++++++++++++--
+ 4 files changed, 81 insertions(+), 2 deletions(-)
+
+diff --git a/AUTHORS b/AUTHORS
+index cd40985..3e02181 100644
+--- a/AUTHORS
++++ b/AUTHORS
+@@ -148,6 +148,7 @@ CONTRIBUTORS:
+       David Miller <davem@davemloft.net>
+       David Prévot <david@tilapin.org>
+       David Woodhouse <dwmw2@infradead.org>
++      Denis Chaplygin <dchaplyg@redhat.com>
+       Denis ChengRq <crquan@gmail.com>
+       Dennis Gilmore <dennis@ausil.us>
+       Dennis Jensen <dennis.h.jensen@siemens.com>
+diff --git a/configure.ac b/configure.ac
+index 266ef08..f87a885 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -917,6 +917,34 @@ if test "x$build_fallocate" = xyes; then
+   AC_MSG_RESULT([no])])
+ fi
+ 
++AS_IF([test "x$build_fallocate" = xyes], [
++  dnl check for valid posix_fallocate() function
++  AC_MSG_CHECKING([for valid posix_fallocate() function])
++  AC_LINK_IFELSE([AC_LANG_PROGRAM([[
++#ifdef HAVE_UNISTD_H
++# include <unistd.h>
++#endif
++#ifdef HAVE_SYS_TYPES_H
++# include <sys/types.h>
++#endif
++#ifdef HAVE_LINUX_FALLOC_H
++# include <linux/falloc.h>
++#endif
++#ifdef HAVE_FCNTL_H
++# include <fcntl.h>
++#endif
++]],[[
++   long ret;
++   ret = posix_fallocate(0, 0xfffffffful, 0xfffffffful);
++   if (ret != 0) {
++      return 1;
++   }
++   ]])],[
++  AC_MSG_RESULT([yes])
++  AC_DEFINE([HAVE_POSIX_FALLOCATE], [1], [Have valid posix_fallocate() function])],[
++  AC_MSG_RESULT([no])])
++])
++
+ 
+ AC_ARG_ENABLE([unshare],
+   AS_HELP_STRING([--disable-unshare], [do not build unshare]),
+diff --git a/sys-utils/fallocate.1 b/sys-utils/fallocate.1
+index 49d26e4..3763530 100644
+--- a/sys-utils/fallocate.1
++++ b/sys-utils/fallocate.1
+@@ -11,6 +11,13 @@ fallocate \- preallocate space to a file
+ .B \-l
+ .IR length
+ .I filename
++.PP
++.B fallocate \-x
++.RB [ \-o
++.IR offset ]
++.RB \-l
++.IR length
++.I filename
+ .SH DESCRIPTION
+ .B fallocate
+ is used to preallocate blocks to a file.  For filesystems which support the
+@@ -39,6 +46,9 @@ Punch holes in the file, the range should not exceed the length of the file.
+ Specifies the beginning offset of the allocation, in bytes.
+ .IP "\fB\-l, \-\-length\fP \fIlength\fP
+ Specifies the length of the allocation, in bytes.
++.IP "\fB\-x , \-\-posix\fP
++Enable POSIX operation mode. In that mode allocation operation always completes,
++but it may take longer time when fast allocation is not supported by the underlying filesystem.
+ .IP "\fB\-h, \-\-help\fP"
+ Print help and exit.
+ .IP "\fB-V, \-\-version"
+diff --git a/sys-utils/fallocate.c b/sys-utils/fallocate.c
+index ff0f9e6..17ae5fe 100644
+--- a/sys-utils/fallocate.c
++++ b/sys-utils/fallocate.c
+@@ -52,6 +52,7 @@
+ #include "strutils.h"
+ #include "c.h"
+ #include "closestream.h"
++#include "optutils.h"
+ 
+ static void __attribute__((__noreturn__)) usage(FILE *out)
+ {
+@@ -63,6 +64,9 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
+ 		" -p, --punch-hole    punch holes in the file\n"
+ 		" -o, --offset <num>  offset of the allocation, in bytes\n"
+ 		" -l, --length <num>  length of the allocation, in bytes\n"), out);
++#ifdef HAVE_POSIX_FALLOCATE
++	fputs(_(" -x, --posix         use posix_fallocate(3) instead of fallocate(2)\n"), out);
++#endif
+ 	fputs(USAGE_SEPARATOR, out);
+ 	fputs(USAGE_HELP, out);
+ 	fputs(USAGE_VERSION, out);
+@@ -71,6 +75,18 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
+ 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
+ }
+ 
++
++#ifdef HAVE_POSIX_FALLOCATE
++static void xposix_fallocate(int fd, off_t offset, off_t length)
++{
++	int error = posix_fallocate(fd, offset, length);
++	if (error < 0) {
++		err(EXIT_FAILURE, _("fallocate failed"));
++	}
++}
++#endif
++
++
+ static loff_t cvtnum(char *s)
+ {
+ 	uintmax_t x;
+@@ -85,9 +101,10 @@ int main(int argc, char **argv)
+ {
+ 	char	*fname;
+ 	int	c;
+-	int	error;
++	int	error = 0;
+ 	int	fd;
+ 	int	mode = 0;
++	int	posix = 0;
+ 	loff_t	length = -2LL;
+ 	loff_t	offset = 0;
+ 
+@@ -98,15 +115,25 @@ int main(int argc, char **argv)
+ 	    { "punch-hole", 0, 0, 'p' },
+ 	    { "offset",    1, 0, 'o' },
+ 	    { "length",    1, 0, 'l' },
++	    { "posix",     0, 0, 'x' },
+ 	    { NULL,        0, 0, 0 }
+ 	};
+ 
++	static const ul_excl_t excl[] = {       /* rows and cols in ASCII order */
++		{ 'x', 'n', 'p' },
++		{ 0 }
++	};
++	int excl_st[ARRAY_SIZE(excl)] = UL_EXCL_STATUS_INIT;
++
+ 	setlocale(LC_ALL, "");
+ 	bindtextdomain(PACKAGE, LOCALEDIR);
+ 	textdomain(PACKAGE);
+ 	atexit(close_stdout);
+ 
+-	while ((c = getopt_long(argc, argv, "hVnpl:o:", longopts, NULL)) != -1) {
++	while ((c = getopt_long(argc, argv, "hVnpl:o:x", longopts, NULL)) != -1) {
++
++		err_exclusive_options(c, longopts, excl, excl_st);
++
+ 		switch(c) {
+ 		case 'h':
+ 			usage(stdout);
+@@ -126,6 +153,13 @@ int main(int argc, char **argv)
+ 		case 'o':
+ 			offset = cvtnum(optarg);
+ 			break;
++		case 'x':
++#ifdef HAVE_POSIX_FALLOCATE
++			posix = 1;
++			break;
++#else
++			errx(EXIT_FAILURE, _("posix_fallocate support is not compiled"))
++#endif
+ 		default:
+ 			usage(stderr);
+ 			break;
+@@ -152,6 +186,12 @@ int main(int argc, char **argv)
+ 	if (fd < 0)
+ 		err(EXIT_FAILURE, _("cannot open %s"), fname);
+ 
++#ifdef HAVE_POSIX_FALLOCATE
++	if (posix)
++		xposix_fallocate(fd, offset, length);
++	else
++#endif
++
+ #ifdef HAVE_FALLOCATE
+ 	error = fallocate(fd, mode, offset, length);
+ #else
+-- 
+2.9.3
+

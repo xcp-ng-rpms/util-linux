@@ -1,0 +1,406 @@
+From 3fcd52706b6818e785a104ed6c4f2b46e5d1ab2f Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Fri, 12 Jan 2018 11:01:26 +0100
+Subject: [PATCH] include/debug: don't print pointer address for SUID programs
+
+* introduce new flag __UL_DEBUG_FL_NOADDR to suppress pointer address printing
+  (and MNT_DEBUG_FL_NOADDR for libmount)
+
+* use __UL_DEBUG_FL_NOADDR when SUID
+
+* move ul_debugobj() to debugobj.h, and require UL_DEBUG_CURRENT_MASK
+  to provide access to the current mask from ul_debugobj(). It's better
+  than modify all ul_debugobj() calls and use the global mask as
+  argument.
+
+* remove never used UL_DEBUG_DEFINE_FLAG
+
+* remove %p from another libmount and libblkid debug messages
+
+Upstream: http://github.com/karelzak/util-linux/commit/6d00cfb2330cb47d00d350eedfbffbbf5991a743
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1534893
+Reported-by: halfdog <me@halfdog.net>
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ include/Makemodule.am                |  2 ++
+ include/debug.h                      | 29 +++++++++++------------------
+ include/debugobj.h                   | 22 ++++++++++++++++++++++
+ lib/loopdev.c                        |  2 +-
+ libblkid/src/partitions/partitions.c | 20 ++++++++++----------
+ libblkid/src/probe.c                 | 21 ++++++++++-----------
+ libmount/src/fs.c                    |  2 +-
+ libmount/src/init.c                  |  5 +++++
+ libmount/src/mountP.h                |  4 +++-
+ libmount/src/tab_diff.c              |  6 +++---
+ libmount/src/tab_update.c            |  4 ++--
+ libsmartcols/src/smartcolsP.h        |  3 +++
+ sys-utils/lsns.c                     |  3 +++
+ 13 files changed, 76 insertions(+), 47 deletions(-)
+ create mode 100644 include/debugobj.h
+
+diff --git a/include/Makemodule.am b/include/Makemodule.am
+index 168029683..bd4aa8cea 100644
+--- a/include/Makemodule.am
++++ b/include/Makemodule.am
+@@ -11,6 +11,8 @@ dist_noinst_HEADERS += \
+ 	include/colors.h \
+ 	include/cpuset.h \
+ 	include/crc32.h \
++	include/debug.h \
++	include/debugobj.h \
+ 	include/env.h \
+ 	include/exec_shell.h \
+ 	include/exitcodes.h \
+diff --git a/include/debug.h b/include/debug.h
+index 848e47456..1c7ed8037 100644
+--- a/include/debug.h
++++ b/include/debug.h
+@@ -13,12 +13,15 @@
+ struct dbg_mask { char *mname; int val; };
+ #define UL_DEBUG_EMPTY_MASKNAMES {{ NULL, 0 }}
+ 
+-#define UL_DEBUG_DEFINE_MASK(m) int m ## _debug_mask
++#define UL_DEBUG_MASK(m)         m ## _debug_mask
++#define UL_DEBUG_DEFINE_MASK(m)  int UL_DEBUG_MASK(m)
+ #define UL_DEBUG_DECLARE_MASK(m) extern UL_DEBUG_DEFINE_MASK(m)
+ #define UL_DEBUG_DEFINE_MASKNAMES(m) static const struct dbg_mask m ## _masknames[]
+ 
+-/* p - flag prefix, m - flag postfix */
+-#define UL_DEBUG_DEFINE_FLAG(p, m) p ## m
++/*
++ * Internal mask flags (above 0xffffff)
++ */
++#define __UL_DEBUG_FL_NOADDR   (1 << 24)       /* Don't print object address */
+ 
+ /* l - library name, p - flag prefix, m - flag postfix, x - function */
+ #define __UL_DBG(l, p, m, x) \
+@@ -55,6 +58,10 @@ struct dbg_mask { char *mname; int val; };
+ 				lib ## _debug_mask = parse_envmask(lib ## _masknames, str); \
+ 		} else \
+ 			lib ## _debug_mask = mask; \
++		if (lib ## _debug_mask) { \
++			if (getuid() != geteuid() || getgid() != getegid()) \
++				lib ## _debug_mask |= __UL_DEBUG_FL_NOADDR; \
++		} \
+ 		lib ## _debug_mask |= pref ## INIT; \
+ 		if (lib ## _debug_mask != pref ## INIT) { \
+ 			__UL_DBG(lib, pref, INIT, ul_debug("library debug mask: 0x%04x", \
+@@ -72,21 +79,7 @@ ul_debug(const char *mesg, ...)
+ 	va_end(ap);
+ 	fputc('\n', stderr);
+ }
+-
+-static inline void __attribute__ ((__format__ (__printf__, 2, 3)))
+-ul_debugobj(void *handler, const char *mesg, ...)
+-{
+-	va_list ap;
+-
+-	if (handler)
+-		fprintf(stderr, "[%p]: ", handler);
+-	va_start(ap, mesg);
+-	vfprintf(stderr, mesg, ap);
+-	va_end(ap);
+-	fputc('\n', stderr);
+-}
+-
+-static inline int parse_envmask(const struct dbg_mask const flagnames[],
++static inline int parse_envmask(const struct dbg_mask flagnames[],
+ 				const char *mask)
+ {
+ 	int res;
+diff --git a/include/debugobj.h b/include/debugobj.h
+new file mode 100644
+index 000000000..73b70b8df
+--- /dev/null
++++ b/include/debugobj.h
+@@ -0,0 +1,22 @@
++#ifndef UTIL_LINUX_DEBUGOBJ_H
++#define UTIL_LINUX_DEBUGOBJ_H
++
++/*
++ * Include *after* debug.h and after UL_DEBUG_CURRENT_MASK define.
++ */
++
++static inline void __attribute__ ((__format__ (__printf__, 2, 3)))
++ul_debugobj(const void *handler, const char *mesg, ...)
++{
++	va_list ap;
++
++	if (handler && !(UL_DEBUG_CURRENT_MASK & __UL_DEBUG_FL_NOADDR))
++		fprintf(stderr, "[%p]: ", handler);
++
++	va_start(ap, mesg);
++	vfprintf(stderr, mesg, ap);
++	va_end(ap);
++	fputc('\n', stderr);
++}
++
++#endif /* UTIL_LINUX_DEBUGOBJ_H */
+diff --git a/lib/loopdev.c b/lib/loopdev.c
+index db5463698..daf0a81e8 100644
+--- a/lib/loopdev.c
++++ b/lib/loopdev.c
+@@ -50,7 +50,7 @@
+ 
+ # define DBG(l,x)	do { \
+ 				if ((l)->debug) {\
+-					fprintf(stderr, "loopdev:  [%p]: ", (l)); \
++					fprintf(stderr, "loopdev: "); \
+ 					x; \
+ 				} \
+ 			} while(0)
+diff --git a/libblkid/src/partitions/partitions.c b/libblkid/src/partitions/partitions.c
+index 9d846ff85..2d0d70d81 100644
+--- a/libblkid/src/partitions/partitions.c
++++ b/libblkid/src/partitions/partitions.c
+@@ -381,8 +381,8 @@ static blkid_partlist partitions_init_data(struct blkid_chain *chn)
+ 
+ 	reset_partlist(ls);
+ 
+-	DBG(LOWPROBE, blkid_debug("parts: initialized partitions list (%p, size=%d)",
+-		ls, ls->nparts_max));
++	DBG(LOWPROBE, blkid_debug("parts: initialized partitions list (size=%d)",
++		ls->nparts_max));
+ 	return ls;
+ }
+ 
+@@ -417,7 +417,7 @@ blkid_parttable blkid_partlist_new_parttable(blkid_partlist ls,
+ 	list_add_tail(&tab->t_tabs, &ls->l_tabs);
+ 
+ 	DBG(LOWPROBE, blkid_debug("parts: create a new partition table "
+-		       "(%p, type=%s, offset=%"PRId64")", tab, type, offset));
++		       "(type=%s, offset=%"PRId64")", type, offset));
+ 	return tab;
+ }
+ 
+@@ -458,9 +458,9 @@ blkid_partition blkid_partlist_add_partition(blkid_partlist ls,
+ 	par->start = start;
+ 	par->size = size;
+ 
+-	DBG(LOWPROBE, blkid_debug("parts: add partition (%p start=%"
+-		PRId64 ", size=%" PRId64 ", table=%p)",
+-		par, par->start, par->size, tab));
++	DBG(LOWPROBE, blkid_debug("parts: add partition (start=%"
++		PRId64 ", size=%" PRId64 ")",
++		par->start, par->size));
+ 	return par;
+ }
+ 
+@@ -662,8 +662,8 @@ int blkid_partitions_do_subprobe(blkid_probe pr, blkid_partition parent,
+ 	blkid_loff_t sz, off;
+ 
+ 	DBG(LOWPROBE, blkid_debug(
+-		"parts: ----> %s subprobe requested (parent=%p)",
+-		id->name, parent));
++		"parts: ----> %s subprobe requested)",
++		id->name));
+ 
+ 	if (!pr || !parent || !parent->size)
+ 		return -EINVAL;
+@@ -709,8 +709,8 @@ int blkid_partitions_do_subprobe(blkid_probe pr, blkid_partition parent,
+ 	blkid_free_probe(prc);	/* free cloned prober */
+ 
+ 	DBG(LOWPROBE, blkid_debug(
+-		"parts: <---- %s subprobe done (parent=%p, rc=%d)",
+-		id->name, parent, rc));
++		"parts: <---- %s subprobe done (rc=%d)",
++		id->name, rc));
+ 
+ 	return rc;
+ }
+diff --git a/libblkid/src/probe.c b/libblkid/src/probe.c
+index 9cf099ae4..07b08441f 100644
+--- a/libblkid/src/probe.c
++++ b/libblkid/src/probe.c
+@@ -145,7 +145,7 @@ blkid_probe blkid_new_probe(void)
+ 	if (!pr)
+ 		return NULL;
+ 
+-	DBG(LOWPROBE, blkid_debug("allocate a new probe %p", pr));
++	DBG(LOWPROBE, blkid_debug("allocate a new probe"));
+ 
+ 	/* initialize chains */
+ 	for (i = 0; i < BLKID_NCHAINS; i++) {
+@@ -260,7 +260,7 @@ void blkid_free_probe(blkid_probe pr)
+ 	blkid_probe_reset_buffer(pr);
+ 	blkid_free_probe(pr->disk_probe);
+ 
+-	DBG(LOWPROBE, blkid_debug("free probe %p", pr));
++	DBG(LOWPROBE, blkid_debug("free probe"));
+ 	free(pr);
+ }
+ 
+@@ -552,8 +552,8 @@ unsigned char *blkid_probe_get_buffer(blkid_probe pr,
+ 				list_entry(p, struct blkid_bufinfo, bufs);
+ 
+ 		if (x->off <= off && off + len <= x->off + x->len) {
+-			DBG(LOWPROBE, blkid_debug("\treuse buffer: off=%jd len=%jd pr=%p",
+-							x->off, x->len, pr));
++			DBG(LOWPROBE, blkid_debug("\treuse buffer: off=%jd len=%jd",
++							x->off, x->len));
+ 			bf = x;
+ 			break;
+ 		}
+@@ -584,8 +584,8 @@ unsigned char *blkid_probe_get_buffer(blkid_probe pr,
+ 		bf->off = off;
+ 		INIT_LIST_HEAD(&bf->bufs);
+ 
+-		DBG(LOWPROBE, blkid_debug("\tbuffer read: off=%jd len=%jd pr=%p",
+-				off, len, pr));
++		DBG(LOWPROBE, blkid_debug("\tbuffer read: off=%jd len=%jd",
++				off, len));
+ 
+ 		ret = read(pr->fd, bf->data, len);
+ 		if (ret != (ssize_t) len) {
+@@ -609,7 +609,7 @@ static void blkid_probe_reset_buffer(blkid_probe pr)
+ 	if (!pr || list_empty(&pr->buffers))
+ 		return;
+ 
+-	DBG(LOWPROBE, blkid_debug("reseting probing buffers pr=%p", pr));
++	DBG(LOWPROBE, blkid_debug("reseting probing buffers"));
+ 
+ 	while (!list_empty(&pr->buffers)) {
+ 		struct blkid_bufinfo *bf = list_entry(pr->buffers.next,
+@@ -766,9 +766,8 @@ int blkid_probe_set_dimension(blkid_probe pr,
+ 		return -1;
+ 
+ 	DBG(LOWPROBE, blkid_debug(
+-		"changing probing area pr=%p: size=%llu, off=%llu "
++		"changing probing area: size=%llu, off=%llu "
+ 		"-to-> size=%llu, off=%llu",
+-		pr,
+ 		(unsigned long long) pr->size,
+ 		(unsigned long long) pr->off,
+ 		(unsigned long long) size,
+@@ -840,7 +839,7 @@ int blkid_probe_get_idmag(blkid_probe pr, const struct blkid_idinfo *id,
+ static inline void blkid_probe_start(blkid_probe pr)
+ {
+ 	if (pr) {
+-		DBG(LOWPROBE, blkid_debug("%p: start probe", pr));
++		DBG(LOWPROBE, blkid_debug("start probe"));
+ 		pr->cur_chain = NULL;
+ 		pr->prob_flags = 0;
+ 		blkid_probe_set_wiper(pr, 0, 0);
+@@ -850,7 +849,7 @@ static inline void blkid_probe_start(blkid_probe pr)
+ static inline void blkid_probe_end(blkid_probe pr)
+ {
+ 	if (pr) {
+-		DBG(LOWPROBE, blkid_debug("%p: end probe", pr));
++		DBG(LOWPROBE, blkid_debug("end probe"));
+ 		pr->cur_chain = NULL;
+ 		pr->prob_flags = 0;
+ 		blkid_probe_set_wiper(pr, 0, 0);
+diff --git a/libmount/src/fs.c b/libmount/src/fs.c
+index 75e3bbb26..e46ee0c0e 100644
+--- a/libmount/src/fs.c
++++ b/libmount/src/fs.c
+@@ -1451,7 +1451,7 @@ int mnt_fs_print_debug(struct libmnt_fs *fs, FILE *file)
+ {
+ 	if (!fs || !file)
+ 		return -EINVAL;
+-	fprintf(file, "------ fs: %p\n", fs);
++	fprintf(file, "------ fs\n");
+ 	fprintf(file, "source: %s\n", mnt_fs_get_source(fs));
+ 	fprintf(file, "target: %s\n", mnt_fs_get_target(fs));
+ 	fprintf(file, "fstype: %s\n", mnt_fs_get_fstype(fs));
+diff --git a/libmount/src/init.c b/libmount/src/init.c
+index 4e5f489c4..e5e6925f5 100644
+--- a/libmount/src/init.c
++++ b/libmount/src/init.c
+@@ -38,6 +38,11 @@ void mnt_init_debug(int mask)
+ 	} else
+ 		libmount_debug_mask = mask;
+ 
++	if (libmount_debug_mask) {
++		if (getuid() != geteuid() || getgid() != getegid())
++			libmount_debug_mask |= MNT_DEBUG_FL_NOADDR;
++	}
++
+ 	libmount_debug_mask |= MNT_DEBUG_INIT;
+ 
+ 	if (libmount_debug_mask && libmount_debug_mask != MNT_DEBUG_INIT) {
+diff --git a/libmount/src/mountP.h b/libmount/src/mountP.h
+index 8b3f92e17..dc3ed3f49 100644
+--- a/libmount/src/mountP.h
++++ b/libmount/src/mountP.h
+@@ -51,6 +51,8 @@
+ #define MNT_DEBUG_DIFF		(1 << 11)
+ #define MNT_DEBUG_ALL		0xFFFF
+ 
++#define MNT_DEBUG_FL_NOADDR	(1 << 24)
++
+ #ifdef CONFIG_LIBMOUNT_DEBUG
+ # include <stdio.h>
+ # include <stdarg.h>
+@@ -91,7 +93,7 @@ mnt_debug_h(void *handler, const char *mesg, ...)
+ {
+ 	va_list ap;
+ 
+-	if (handler)
++	if (handler && !(libmount_debug_mask & MNT_DEBUG_FL_NOADDR))
+ 		fprintf(stderr, "[%p]: ", handler);
+ 	va_start(ap, mesg);
+ 	vfprintf(stderr, mesg, ap);
+diff --git a/libmount/src/tab_diff.c b/libmount/src/tab_diff.c
+index f01f889f8..0a69f402c 100644
+--- a/libmount/src/tab_diff.c
++++ b/libmount/src/tab_diff.c
+@@ -229,9 +229,9 @@ int mnt_diff_tables(struct libmnt_tabdiff *df, struct libmnt_table *old_tab,
+ 	if (!no && !nn)			/* both tables are empty */
+ 		return 0;
+ 
+-	DBG(DIFF, mnt_debug_h(df, "analyze new=%p (%d entries), "
+-				          "old=%p (%d entries)",
+-				new_tab, nn, old_tab, no));
++	DBG(DIFF, mnt_debug_h(df, "analyze new (%d entries), "
++				          "old (%d entries)",
++				nn, no));
+ 
+ 	mnt_reset_iter(&itr, MNT_ITER_FORWARD);
+ 
+diff --git a/libmount/src/tab_update.c b/libmount/src/tab_update.c
+index 5f503cad7..b45c4a92c 100644
+--- a/libmount/src/tab_update.c
++++ b/libmount/src/tab_update.c
+@@ -173,8 +173,8 @@ int mnt_update_set_fs(struct libmnt_update *upd, unsigned long mountflags,
+ 		return -EINVAL;
+ 
+ 	DBG(UPDATE, mnt_debug_h(upd,
+-			"resetting FS [fs=0x%p, target=%s, flags=0x%08lx]",
+-			fs, target, mountflags));
++			"resetting FS [target=%s, flags=0x%08lx]",
++			target, mountflags));
+ 	if (fs) {
+ 		DBG(UPDATE, mnt_debug_h(upd, "FS template:"));
+ 		DBG(UPDATE, mnt_fs_print_debug(fs, stderr));
+diff --git a/libsmartcols/src/smartcolsP.h b/libsmartcols/src/smartcolsP.h
+index 28246c14f..cea4f3101 100644
+--- a/libsmartcols/src/smartcolsP.h
++++ b/libsmartcols/src/smartcolsP.h
+@@ -43,6 +43,9 @@ UL_DEBUG_DECLARE_MASK(libsmartcols);
+ #define ON_DBG(m, x)	__UL_DBG_CALL(libsmartcols, SCOLS_DEBUG_, m, x)
+ #define DBG_FLUSH	__UL_DBG_FLUSH(libsmartcols, SCOLS_DEBUG_)
+ 
++#define UL_DEBUG_CURRENT_MASK  UL_DEBUG_MASK(libsmartcols)
++#include "debugobj.h"
++
+ /*
+  * Generic iterator
+  */
+diff --git a/sys-utils/lsns.c b/sys-utils/lsns.c
+index 5ee298172..fb53a16a4 100644
+--- a/sys-utils/lsns.c
++++ b/sys-utils/lsns.c
+@@ -55,6 +55,9 @@ UL_DEBUG_DEFINE_MASKNAMES(lsns) = UL_DEBUG_EMPTY_MASKNAMES;
+ #define DBG(m, x)       __UL_DBG(lsns, LSNS_DEBUG_, m, x)
+ #define ON_DBG(m, x)    __UL_DBG_CALL(lsns, LSNS_DEBUG_, m, x)
+ 
++#define UL_DEBUG_CURRENT_MASK  UL_DEBUG_MASK(lsns)
++#include "debugobj.h"
++
+ struct idcache *uid_cache = NULL;
+ 
+ /* column IDs */
+-- 
+2.13.6
+

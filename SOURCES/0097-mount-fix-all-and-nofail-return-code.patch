@@ -1,0 +1,43 @@
+From d94c73b186ea4fec6333d1fb6cced1b4b8515d58 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 7 Apr 2014 11:53:05 +0200
+Subject: [PATCH 097/116] mount: fix --all and nofail return code
+
+Now the "nofail" affects warnings warning messages only. That's wrong
+and regression (against original non-libmount version). The nofail has
+to control return code too.
+
+Upstream: https://github.com/karelzak/util-linux/commit/8ab82185eed76bc20694a197fe10c5f9fb795b80
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1357746
+Reported-by: Patrick McLean <chutzpah@gentoo.org>
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/mount.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/sys-utils/mount.c b/sys-utils/mount.c
+index f332070..44e2b7c 100644
+--- a/sys-utils/mount.c
++++ b/sys-utils/mount.c
+@@ -197,12 +197,14 @@ static int mount_all(struct libmnt_context *cxt)
+ 			if (mnt_context_is_verbose(cxt))
+ 				printf("%-25s: mount successfully forked\n", tgt);
+ 		} else {
+-			mk_exit_code(cxt, mntrc);	/* to print warnings */
+-
+-			if (mnt_context_get_status(cxt)) {
++			if (mk_exit_code(cxt, mntrc) == MOUNT_EX_SUCCESS) {
+ 				nsucc++;
+ 
+-				if (mnt_context_is_verbose(cxt))
++				/* Note that MOUNT_EX_SUCCESS return code does
++				 * not mean that FS has been really mounted
++				 * (e.g. nofail option) */
++				if (mnt_context_get_status(cxt) 
++				    && mnt_context_is_verbose(cxt))
+ 					printf("%-25s: successfully mounted\n", tgt);
+ 			} else
+ 				nerrs++;
+-- 
+2.9.3
+

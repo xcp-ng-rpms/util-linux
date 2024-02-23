@@ -1,0 +1,33 @@
+From 81ffb923caad0eff603c708cc4d2fe0e3cff295f Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 16 Oct 2017 12:20:40 +0200
+Subject: [PATCH 128/135] fdisk: remove obsolete info about GPT from man page
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1490984
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ fdisks/fdisk.8 | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/fdisks/fdisk.8 b/fdisks/fdisk.8
+index e4e585f12..39e4ad5c3 100644
+--- a/fdisks/fdisk.8
++++ b/fdisks/fdisk.8
+@@ -33,12 +33,8 @@ fdisk \- manipulate disk partition table
+ (in the first form of invocation)
+ is a menu-driven program for creation and manipulation of
+ partition tables.
+-It understands DOS-type partition tables and BSD- or SUN-type disklabels.
+-
+-.B fdisk
+-does not understand GUID partition tables (GPTs) and it is not designed
+-for large partitions.  In these cases, use the more advanced GNU
+-.BR parted (8).
++It understands GPT (experimental for now), MBR, Sun, SGI and BSD
++partition tables.
+ 
+ .B fdisk
+ does not use DOS-compatible mode and cylinders as display units by default.
+-- 
+2.13.6
+

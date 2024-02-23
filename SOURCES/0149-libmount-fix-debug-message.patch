@@ -1,0 +1,28 @@
+From c817652429d4326bb43a8d975611927170447805 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 1 Feb 2018 16:52:14 +0100
+Subject: [PATCH] libmount: fix debug message
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1534893
+Upstream: http://github.com/karelzak/util-linux/commit/b058f473d175450c48a65031f1abc8d8b90b2b7b
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libmount/src/fs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libmount/src/fs.c b/libmount/src/fs.c
+index e46ee0c0e..e5c38c1b6 100644
+--- a/libmount/src/fs.c
++++ b/libmount/src/fs.c
+@@ -1451,7 +1451,7 @@ int mnt_fs_print_debug(struct libmnt_fs *fs, FILE *file)
+ {
+ 	if (!fs || !file)
+ 		return -EINVAL;
+-	fprintf(file, "------ fs\n");
++	fprintf(file, "------ fs:\n");
+ 	fprintf(file, "source: %s\n", mnt_fs_get_source(fs));
+ 	fprintf(file, "target: %s\n", mnt_fs_get_target(fs));
+ 	fprintf(file, "fstype: %s\n", mnt_fs_get_fstype(fs));
+-- 
+2.14.3
+

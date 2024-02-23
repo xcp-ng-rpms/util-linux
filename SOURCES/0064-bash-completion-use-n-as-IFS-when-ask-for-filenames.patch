@@ -1,0 +1,623 @@
+From 28907c1a50132c9a308b8d2c22bf4905041c446f Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 30 Sep 2013 15:49:00 +0200
+Subject: [PATCH 64/84] bash-completion: use '\n' as IFS when ask for filenames
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The bash completion for more(1) treats the space-separated pieces of
+filenames as different files.
+
+	$ touch foo\ bar
+	$ more foo<TAB>
+	bar foo
+
+Upstream: http://github.com/karelzak/util-linux/commit/ce3e6b15e2c4478b2df9a7016c168b16325abfb0
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1296366
+Reported-by: Ángel González <ingenit@zoho.com>
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ bash-completion/blkid        | 1 +
+ bash-completion/colcrt       | 1 +
+ bash-completion/column       | 1 +
+ bash-completion/cytune       | 1 +
+ bash-completion/dmesg        | 1 +
+ bash-completion/fallocate    | 1 +
+ bash-completion/findmnt      | 1 +
+ bash-completion/flock        | 1 +
+ bash-completion/fsck.cramfs  | 1 +
+ bash-completion/hexdump      | 1 +
+ bash-completion/hwclock      | 1 +
+ bash-completion/ionice       | 1 +
+ bash-completion/last         | 1 +
+ bash-completion/ldattach     | 1 +
+ bash-completion/logger       | 1 +
+ bash-completion/look         | 1 +
+ bash-completion/losetup      | 1 +
+ bash-completion/lscpu        | 1 +
+ bash-completion/lslocks      | 1 +
+ bash-completion/mcookie      | 1 +
+ bash-completion/mkfs.cramfs  | 1 +
+ bash-completion/mkswap       | 1 +
+ bash-completion/more         | 2 ++
+ bash-completion/mountpoint   | 1 +
+ bash-completion/namei        | 1 +
+ bash-completion/nsenter      | 1 +
+ bash-completion/pg           | 1 +
+ bash-completion/pivot_root   | 1 +
+ bash-completion/readprofile  | 1 +
+ bash-completion/rename       | 1 +
+ bash-completion/rev          | 1 +
+ bash-completion/script       | 1 +
+ bash-completion/scriptreplay | 1 +
+ bash-completion/setterm      | 1 +
+ bash-completion/sfdisk       | 1 +
+ bash-completion/su           | 1 +
+ bash-completion/swaplabel    | 1 +
+ bash-completion/tailf        | 1 +
+ bash-completion/tunelp       | 1 +
+ bash-completion/ul           | 1 +
+ bash-completion/utmpdump     | 1 +
+ bash-completion/uuidd        | 3 +++
+ bash-completion/wall         | 1 +
+ bash-completion/wdctl        | 1 +
+ bash-completion/whereis      | 1 +
+ 45 files changed, 48 insertions(+)
+
+diff --git a/bash-completion/blkid b/bash-completion/blkid
+index b439328..9f97dd9 100644
+--- a/bash-completion/blkid
++++ b/bash-completion/blkid
+@@ -6,6 +6,7 @@ _blkid_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-c')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/colcrt b/bash-completion/colcrt
+index f9e4c33..c66d7e6 100644
+--- a/bash-completion/colcrt
++++ b/bash-completion/colcrt
+@@ -19,6 +19,7 @@ _colcrt_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/column b/bash-completion/column
+index f5cb86b..3af8e73 100644
+--- a/bash-completion/column
++++ b/bash-completion/column
+@@ -30,6 +30,7 @@ _column_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/cytune b/bash-completion/cytune
+index 4f42838..f685c88 100644
+--- a/bash-completion/cytune
++++ b/bash-completion/cytune
+@@ -33,6 +33,7 @@ _cytune_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- ${cur:-"/dev/tty"}) )
+ 	return 0
+diff --git a/bash-completion/dmesg b/bash-completion/dmesg
+index 60ecc1a..eab41ba 100644
+--- a/bash-completion/dmesg
++++ b/bash-completion/dmesg
+@@ -6,6 +6,7 @@ _dmesg_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-F'|'--file')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/fallocate b/bash-completion/fallocate
+index 5007b60..2c6e4cb 100644
+--- a/bash-completion/fallocate
++++ b/bash-completion/fallocate
+@@ -20,6 +20,7 @@ _fallocate_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/findmnt b/bash-completion/findmnt
+index 9386d8f..3ed331a 100644
+--- a/bash-completion/findmnt
++++ b/bash-completion/findmnt
+@@ -18,6 +18,7 @@ _findmnt_module()
+ 			return 0
+ 			;;
+ 		'-F'|'--tab-file')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/flock b/bash-completion/flock
+index 8cd60d3..8e7f8b8 100644
+--- a/bash-completion/flock
++++ b/bash-completion/flock
+@@ -38,6 +38,7 @@ _flock_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- ${cur:-"/"}) )
+ 	return 0
+diff --git a/bash-completion/fsck.cramfs b/bash-completion/fsck.cramfs
+index 84f6f31..acf6564 100644
+--- a/bash-completion/fsck.cramfs
++++ b/bash-completion/fsck.cramfs
+@@ -6,6 +6,7 @@ _fsck.cramfs_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-x'|'--destination')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -o dirnames -- ${cur:-"/"}) )
+ 			return 0
+diff --git a/bash-completion/hexdump b/bash-completion/hexdump
+index 0c91187..c17bcae 100644
+--- a/bash-completion/hexdump
++++ b/bash-completion/hexdump
+@@ -28,6 +28,7 @@ _hexdump_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/hwclock b/bash-completion/hwclock
+index 0c4ebaf..de1ac20 100644
+--- a/bash-completion/hwclock
++++ b/bash-completion/hwclock
+@@ -6,6 +6,7 @@ _hwclock_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-f'|'--rtc'|'--adjfile')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/ionice b/bash-completion/ionice
+index 3a01c51..1b1c5fe 100644
+--- a/bash-completion/ionice
++++ b/bash-completion/ionice
+@@ -30,6 +30,7 @@ _ionice_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/last b/bash-completion/last
+index 493051e..c93be3d 100644
+--- a/bash-completion/last
++++ b/bash-completion/last
+@@ -6,6 +6,7 @@ _last_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-f')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/ldattach b/bash-completion/ldattach
+index 830142d..0b9d260 100644
+--- a/bash-completion/ldattach
++++ b/bash-completion/ldattach
+@@ -42,6 +42,7 @@ _ldattach_module()
+ 			return 0
+ 			;;
+ 		/*)
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/logger b/bash-completion/logger
+index f46be8a..963abc7 100644
+--- a/bash-completion/logger
++++ b/bash-completion/logger
+@@ -6,6 +6,7 @@ _logger_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-f'|'--file')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/look b/bash-completion/look
+index e8676ba..303a756 100644
+--- a/bash-completion/look
++++ b/bash-completion/look
+@@ -20,6 +20,7 @@ _look_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/losetup b/bash-completion/losetup
+index 75240b8..874c549 100644
+--- a/bash-completion/losetup
++++ b/bash-completion/losetup
+@@ -60,6 +60,7 @@ _losetup_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/lscpu b/bash-completion/lscpu
+index bce07c4..244b418 100644
+--- a/bash-completion/lscpu
++++ b/bash-completion/lscpu
+@@ -41,6 +41,7 @@ _lscpu_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/lslocks b/bash-completion/lslocks
+index 337d07e..c9cff2c 100644
+--- a/bash-completion/lslocks
++++ b/bash-completion/lslocks
+@@ -38,6 +38,7 @@ _lslocks_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/mcookie b/bash-completion/mcookie
+index eb3f54b..4345b6e 100644
+--- a/bash-completion/mcookie
++++ b/bash-completion/mcookie
+@@ -6,6 +6,7 @@ _mcookie_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-f'|'--file')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/mkfs.cramfs b/bash-completion/mkfs.cramfs
+index 38ab3b6..af74e12 100644
+--- a/bash-completion/mkfs.cramfs
++++ b/bash-completion/mkfs.cramfs
+@@ -36,6 +36,7 @@ _mkfs.cramfs_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/mkswap b/bash-completion/mkswap
+index c411b30..b72efaf 100644
+--- a/bash-completion/mkswap
++++ b/bash-completion/mkswap
+@@ -28,6 +28,7 @@ _mkswap_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/more b/bash-completion/more
+index 945c7b3..809cea2 100644
+--- a/bash-completion/more
++++ b/bash-completion/more
+@@ -21,6 +21,8 @@ _more_module()
+ 			return 0
+ 			;;
+ 	esac
++
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/mountpoint b/bash-completion/mountpoint
+index 8fe27b8..f74efc9 100644
+--- a/bash-completion/mountpoint
++++ b/bash-completion/mountpoint
+@@ -20,6 +20,7 @@ _mountpoint_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- ${cur:-"/"}) )
+ 	return 0
+diff --git a/bash-completion/namei b/bash-completion/namei
+index 63fb37a..6402735 100644
+--- a/bash-completion/namei
++++ b/bash-completion/namei
+@@ -16,6 +16,7 @@ _namei_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/nsenter b/bash-completion/nsenter
+index 2970b8d..268f378 100644
+--- a/bash-completion/nsenter
++++ b/bash-completion/nsenter
+@@ -40,6 +40,7 @@ _nsenter_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/pg b/bash-completion/pg
+index 9b1bad9..8fce130 100644
+--- a/bash-completion/pg
++++ b/bash-completion/pg
+@@ -25,6 +25,7 @@ _pg_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/pivot_root b/bash-completion/pivot_root
+index 961c883..95df4b4 100644
+--- a/bash-completion/pivot_root
++++ b/bash-completion/pivot_root
+@@ -11,6 +11,7 @@ _pivot_root_module()
+ 	esac
+ 	case $COMP_CWORD in
+ 		1|2)
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -o dirnames -- ${cur:-"/"}) )
+ 			;;
+diff --git a/bash-completion/readprofile b/bash-completion/readprofile
+index a5f45f5..bd265a6 100644
+--- a/bash-completion/readprofile
++++ b/bash-completion/readprofile
+@@ -6,6 +6,7 @@ _readprofile_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-m'|'--mapfile'|'-p'|'--profile')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/rename b/bash-completion/rename
+index 3842c4d..81365a5 100644
+--- a/bash-completion/rename
++++ b/bash-completion/rename
+@@ -24,6 +24,7 @@ _rename_module()
+ 			COMPREPLY=( $(compgen -W "replacement" -- $cur) )
+ 			;;
+ 		*)
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			;;
+diff --git a/bash-completion/rev b/bash-completion/rev
+index 619c5c4..e5397d5 100644
+--- a/bash-completion/rev
++++ b/bash-completion/rev
+@@ -16,6 +16,7 @@ _rev_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/script b/bash-completion/script
+index 329fc48..d7efd7e 100644
+--- a/bash-completion/script
++++ b/bash-completion/script
+@@ -32,6 +32,7 @@ _script_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/scriptreplay b/bash-completion/scriptreplay
+index 2ad7b11..a4aa8a0 100644
+--- a/bash-completion/scriptreplay
++++ b/bash-completion/scriptreplay
+@@ -24,6 +24,7 @@ _scriptreplay_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/setterm b/bash-completion/setterm
+index 7fa0a4e..a7ef6eb 100644
+--- a/bash-completion/setterm
++++ b/bash-completion/setterm
+@@ -45,6 +45,7 @@ _setterm_module()
+ 			return 0
+ 			;;
+ 		'-file')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/sfdisk b/bash-completion/sfdisk
+index 0226b04..609104c 100644
+--- a/bash-completion/sfdisk
++++ b/bash-completion/sfdisk
+@@ -14,6 +14,7 @@ _sfdisk_module()
+ 			return 0
+ 			;;
+ 		'-O'|'-I')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+diff --git a/bash-completion/su b/bash-completion/su
+index e739b56..dad1b5f 100644
+--- a/bash-completion/su
++++ b/bash-completion/su
+@@ -38,6 +38,7 @@ _su_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/swaplabel b/bash-completion/swaplabel
+index 093169e..08aa9cd 100644
+--- a/bash-completion/swaplabel
++++ b/bash-completion/swaplabel
+@@ -24,6 +24,7 @@ _swaplabel_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/tailf b/bash-completion/tailf
+index e3dd295..0d4c869 100644
+--- a/bash-completion/tailf
++++ b/bash-completion/tailf
+@@ -20,6 +20,7 @@ _tailf_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/tunelp b/bash-completion/tunelp
+index 614b235..bd2cce2 100644
+--- a/bash-completion/tunelp
++++ b/bash-completion/tunelp
+@@ -44,6 +44,7 @@ _tunelp_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- ${cur:-"/dev/lp"}) )
+ 	return 0
+diff --git a/bash-completion/ul b/bash-completion/ul
+index c00e510..449cbe0 100644
+--- a/bash-completion/ul
++++ b/bash-completion/ul
+@@ -25,6 +25,7 @@ _ul_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/utmpdump b/bash-completion/utmpdump
+index 3b868ce..7e4fd5a 100644
+--- a/bash-completion/utmpdump
++++ b/bash-completion/utmpdump
+@@ -16,6 +16,7 @@ _utmpdump_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/uuidd b/bash-completion/uuidd
+index c45b067..c8f6697 100644
+--- a/bash-completion/uuidd
++++ b/bash-completion/uuidd
+@@ -6,16 +6,19 @@ _uuidd_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-p'|'--pid'|'-s'|'--socket')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -f -- $cur) )
+ 			return 0
+ 			;;
+ 		'-T'|'--timeout')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -W "timeout" -- $cur) )
+ 			return 0
+ 			;;
+ 		'-n'|'--uuids')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -W "number" -- $cur) )
+ 			return 0
+diff --git a/bash-completion/wall b/bash-completion/wall
+index 55d9658..e3145ff 100644
+--- a/bash-completion/wall
++++ b/bash-completion/wall
+@@ -20,6 +20,7 @@ _wall_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- $cur) )
+ 	return 0
+diff --git a/bash-completion/wdctl b/bash-completion/wdctl
+index 33b4e1f..4f16e76 100644
+--- a/bash-completion/wdctl
++++ b/bash-completion/wdctl
+@@ -56,6 +56,7 @@ _wdctl_module()
+ 			return 0
+ 			;;
+ 	esac
++	local IFS=$'\n'
+ 	compopt -o filenames
+ 	COMPREPLY=( $(compgen -f -- ${cur:-"/dev/"}) )
+ 	return 0
+diff --git a/bash-completion/whereis b/bash-completion/whereis
+index 2273a07..0dcbac3 100644
+--- a/bash-completion/whereis
++++ b/bash-completion/whereis
+@@ -6,6 +6,7 @@ _whereis_module()
+ 	prev="${COMP_WORDS[COMP_CWORD-1]}"
+ 	case $prev in
+ 		'-B'|'-M'|'-S')
++			local IFS=$'\n'
+ 			compopt -o filenames
+ 			COMPREPLY=( $(compgen -o dirnames -- ${cur:-"/"}) )
+ 			return 0
+-- 
+2.7.4
+

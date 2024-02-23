@@ -1,0 +1,28 @@
+From 0f0a36e64ed47721e8b8d41b81ae3b1817d19194 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 19 Nov 2015 19:08:00 +0100
+Subject: [PATCH 112/116] tests: update ZFS test
+
+Upstream: https://github.com/karelzak/util-linux/commit/0172ebba52718afe89b5d1941266825b065358cb
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1392661
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ tests/expected/blkid/low-probe-zfs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/expected/blkid/low-probe-zfs b/tests/expected/blkid/low-probe-zfs
+index 46727de..952e0e5 100644
+--- a/tests/expected/blkid/low-probe-zfs
++++ b/tests/expected/blkid/low-probe-zfs
+@@ -1,7 +1,7 @@
+ ID_FS_LABEL=tank
+ ID_FS_LABEL_ENC=tank
+ ID_FS_TYPE=zfs_member
+-ID_FS_USAGE=raid
++ID_FS_USAGE=filesystem
+ ID_FS_UUID=1782036546311300980
+ ID_FS_UUID_ENC=1782036546311300980
+ ID_FS_UUID_SUB=13179280127379850514
+-- 
+2.9.3
+

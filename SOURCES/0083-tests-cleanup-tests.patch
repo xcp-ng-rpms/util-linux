@@ -1,0 +1,276 @@
+From d35dfbe11f7c6b84d40a6e54611dc3a8c9c27b4d Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 30 Jun 2016 11:00:54 +0200
+Subject: [PATCH 83/86] tests: cleanup tests
+
+... mostly to be more portable to the new kernels and userspace.
+
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1153770
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ tests/commands.sh                           |  1 +
+ tests/expected/blkid/md-raid0-whole         |  2 +-
+ tests/expected/blkid/md-raid1-part          |  2 +-
+ tests/expected/blkid/md-raid1-whole         |  2 +-
+ tests/expected/fdisk/align-512-4K           |  2 +-
+ tests/expected/fdisk/align-512-4K-63        |  2 +-
+ tests/expected/fdisk/align-512-4K-md        |  4 ++--
+ tests/expected/fdisk/align-512-512          |  2 +-
+ tests/expected/fdisk/align-512-512-topology |  2 +-
+ tests/expected/ipcs/limits                  |  4 ----
+ tests/functions.sh                          | 29 +++++++++++++++++++++++------
+ tests/ts/ipcs/limits                        |  5 +----
+ tests/ts/ipcs/limits2                       |  2 ++
+ tests/ts/libmount/context-utab              | 10 ++++++++--
+ 14 files changed, 44 insertions(+), 25 deletions(-)
+
+diff --git a/tests/commands.sh b/tests/commands.sh
+index a2948c9..e769b5d 100644
+--- a/tests/commands.sh
++++ b/tests/commands.sh
+@@ -64,3 +64,4 @@ TS_CMD_UL=${TS_CMD_UL-"$top_builddir/ul"}
+ TS_CMD_UMOUNT=${TS_CMD_UMOUNT:-"$top_builddir/umount"}
+ TS_CMD_UTMPDUMP=${TS_CMD_UTMPDUMP-"$top_builddir/utmpdump"}
+ TS_CMD_WHEREIS=${TS_CMD_WHEREIS-"$top_builddir/whereis"}
++TS_CMD_WIPEFS=${TS_CMD_WIPEFS-"$top_builddir/wipefs"}
+diff --git a/tests/expected/blkid/md-raid0-whole b/tests/expected/blkid/md-raid0-whole
+index 37dabf3..30825de 100644
+--- a/tests/expected/blkid/md-raid0-whole
++++ b/tests/expected/blkid/md-raid0-whole
+@@ -26,7 +26,7 @@ Command (m for help):
+ Disk /dev/md8: 104 MB, 104726528 bytes, 204544 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+-I/O size (minimum/optimal): 65536 bytes / 131072 bytes
++I/O size (minimum/optimal): 65536 bytes / <removed> bytes
+ Disk label type: dos
+ 
+ 
+diff --git a/tests/expected/blkid/md-raid1-part b/tests/expected/blkid/md-raid1-part
+index f409952..3d1b38c 100644
+--- a/tests/expected/blkid/md-raid1-part
++++ b/tests/expected/blkid/md-raid1-part
+@@ -24,7 +24,7 @@ Command (m for help):
+ Disk /dev/...: 53 MB, 53477376 bytes, 104448 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+-I/O size (minimum/optimal): 512 bytes / 32768 bytes
++I/O size (minimum/optimal): 512 bytes / <removed> bytes
+ Disk label type: dos
+ 
+ 
+diff --git a/tests/expected/blkid/md-raid1-whole b/tests/expected/blkid/md-raid1-whole
+index 8977312..8ab1da2 100644
+--- a/tests/expected/blkid/md-raid1-whole
++++ b/tests/expected/blkid/md-raid1-whole
+@@ -25,7 +25,7 @@ Command (m for help):
+ Disk /dev/md8: 52 MB, 52363264 bytes, 102272 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+-I/O size (minimum/optimal): 512 bytes / 512 bytes
++I/O size (minimum/optimal): 512 bytes / <removed> bytes
+ Disk label type: dos
+ 
+ 
+diff --git a/tests/expected/fdisk/align-512-4K b/tests/expected/fdisk/align-512-4K
+index e5a28f5..7b52fd2 100644
+--- a/tests/expected/fdisk/align-512-4K
++++ b/tests/expected/fdisk/align-512-4K
+@@ -57,7 +57,7 @@ Command (m for help):
+ Disk /dev/...: 52 MB, 52428800 bytes, 102400 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 4096 bytes
+-I/O size (minimum/optimal): 4096 bytes / 32768 bytes
++I/O size (minimum/optimal): 4096 bytes / <removed> bytes
+ Disk label type: dos
+ 
+ 
+diff --git a/tests/expected/fdisk/align-512-4K-63 b/tests/expected/fdisk/align-512-4K-63
+index 7e236ce..302a429 100644
+--- a/tests/expected/fdisk/align-512-4K-63
++++ b/tests/expected/fdisk/align-512-4K-63
+@@ -57,7 +57,7 @@ Command (m for help):
+ Disk /dev/...: 52 MB, 52428800 bytes, 102400 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 4096 bytes
+-I/O size (minimum/optimal): 4096 bytes / 32768 bytes
++I/O size (minimum/optimal): 4096 bytes / <removed> bytes
+ Alignment offset: 3584 bytes
+ Disk label type: dos
+ 
+diff --git a/tests/expected/fdisk/align-512-4K-md b/tests/expected/fdisk/align-512-4K-md
+index dbbbc05..e8f6ba1 100644
+--- a/tests/expected/fdisk/align-512-4K-md
++++ b/tests/expected/fdisk/align-512-4K-md
+@@ -28,7 +28,7 @@ Command (m for help):
+ Disk /dev/...: 52 MB, 52428800 bytes, 102400 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 4096 bytes
+-I/O size (minimum/optimal): 4096 bytes / 32768 bytes
++I/O size (minimum/optimal): 4096 bytes / <removed> bytes
+ Disk label type: dos
+ 
+ 
+@@ -72,7 +72,7 @@ Command (m for help):
+ Disk /dev/md8: 51 MB, 51249152 bytes, 100096 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 4096 bytes
+-I/O size (minimum/optimal): 65536 bytes / 131072 bytes
++I/O size (minimum/optimal): 65536 bytes / <removed> bytes
+ Disk label type: dos
+ 
+ 
+diff --git a/tests/expected/fdisk/align-512-512 b/tests/expected/fdisk/align-512-512
+index 018322f..8e03d90 100644
+--- a/tests/expected/fdisk/align-512-512
++++ b/tests/expected/fdisk/align-512-512
+@@ -53,7 +53,7 @@ Command (m for help):
+ Disk /dev/loop0: 52 MB, 52428800 bytes, 102400 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+-I/O size (minimum/optimal): 512 bytes / 512 bytes
++I/O size (minimum/optimal): 512 bytes / <removed> bytes
+ Disk label type: dos
+ 
+ 
+diff --git a/tests/expected/fdisk/align-512-512-topology b/tests/expected/fdisk/align-512-512-topology
+index b3d3114..fd57f60 100644
+--- a/tests/expected/fdisk/align-512-512-topology
++++ b/tests/expected/fdisk/align-512-512-topology
+@@ -53,7 +53,7 @@ Command (m for help):
+ Disk /dev/...: 52 MB, 52428800 bytes, 102400 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+-I/O size (minimum/optimal): 512 bytes / 32768 bytes
++I/O size (minimum/optimal): 512 bytes / <removed> bytes
+ Disk label type: dos
+ 
+ 
+diff --git a/tests/expected/ipcs/limits b/tests/expected/ipcs/limits
+index 7480a1e..e08fa54 100644
+--- a/tests/expected/ipcs/limits
++++ b/tests/expected/ipcs/limits
+@@ -1,8 +1,4 @@
+ load original values
+-check for difference between kernel and IPC
+-/proc/sys/kernel/shmmni OK
+-/proc/sys/kernel/shmall OK
+-/proc/sys/kernel/shmmax OK
+ maximalize kernel setting
+ re-check for difference between kernel and IPC
+ /proc/sys/kernel/shmmni OK
+diff --git a/tests/functions.sh b/tests/functions.sh
+index b2d493c..0d1c9c8 100644
+--- a/tests/functions.sh
++++ b/tests/functions.sh
+@@ -31,6 +31,17 @@ function ts_canonicalize {
+ 	fi
+ }
+ 
++function ts_check_test_command {
++	if [ ! -x "$1" ]; then
++		ts_skip "${1##*/} not found"
++	fi
++}
++
++function ts_check_prog {
++	local cmd=$1
++	type "$cmd" >/dev/null 2>&1 || ts_skip "missing in PATH: $cmd"
++}
++
+ function ts_skip_subtest {
+ 	echo " IGNORE ($1)"
+ }
+@@ -474,14 +485,20 @@ function ts_fdisk_clean {
+ 	local DEVNAME=$(basename "$1")
+ 
+ 	# remove non comparable parts of fdisk output
+-	if [ x"${DEVNAME}" != x"" ]; then
+-	       sed -i -e "s/\/dev\/${DEVNAME}/\/dev\/.../g" $TS_OUTPUT
++	if [ -n "${DEVNAME}" ]; then
++		sed -i -e "s@${DEVNAME}@...@;" $TS_OUTPUT
+ 	fi
+ 
+-	sed -i -e 's/Disk identifier:.*//g' \
+-	       -e 's/Building a new.*//g' \
+-	       -e 's/Welcome to fdisk.*//g' \
+-	       $TS_OUTPUT
++	sed -i \
++		-e 's/Disk identifier:.*//' \
++		-e 's/Building a new.*//' \
++		-e 's/Created a new.*//' \
++		-e 's/^Device[[:blank:]]*Start/Device             Start/' \
++		-e 's/^Device[[:blank:]]*Boot/Device     Boot/' \
++		-e 's/Welcome to fdisk.*//' \
++		-e 's/typescript file.*/typescript file <removed>./' \
++		-e 's@^\(I/O size (minimum/op.* bytes /\) [1-9][0-9]* @\1 <removed> @' \
++		$TS_OUTPUT
+ }
+ 
+ function ts_scsi_debug_init {
+diff --git a/tests/ts/ipcs/limits b/tests/ts/ipcs/limits
+index b44adb1..c4717c3 100755
+--- a/tests/ts/ipcs/limits
++++ b/tests/ts/ipcs/limits
+@@ -23,7 +23,7 @@ TS_DESC="limits overflow"
+ 
+ ts_init "$*"
+ ts_skip_nonroot
+-type bc >/dev/null 2>&1 || ts_skip "cannot find bc command"
++ts_check_prog "bc"
+ 
+ . $TS_SELF/functions.sh
+ 
+@@ -32,9 +32,6 @@ for i in $IPCS_IDX; do
+ 	SHM_ORG[$i]=$(cat ${IPCS_PROCFILES[$i]})
+ done >> $TS_OUTPUT
+ 
+-ts_log "check for difference between kernel and IPC"
+-ipcs_limits_check >> $TS_OUTPUT
+-
+ ts_log "maximalize kernel setting"
+ for i in $IPCS_IDX; do
+ 	echo ${IPCS_LIMITS[$i]} >> ${IPCS_PROCFILES[$i]}
+diff --git a/tests/ts/ipcs/limits2 b/tests/ts/ipcs/limits2
+index 63f834d..2eabfd2 100755
+--- a/tests/ts/ipcs/limits2
++++ b/tests/ts/ipcs/limits2
+@@ -22,6 +22,8 @@ TS_DESC="basic limits"
+ . $TS_TOPDIR/functions.sh
+ ts_init "$*"
+ 
++ts_check_prog "bc"
++
+ . $TS_SELF/functions.sh
+ 
+ # TODO https://github.com/karelzak/util-linux/issues/51
+diff --git a/tests/ts/libmount/context-utab b/tests/ts/libmount/context-utab
+index 859fc2b..b2bfefc 100755
+--- a/tests/ts/libmount/context-utab
++++ b/tests/ts/libmount/context-utab
+@@ -87,14 +87,20 @@ ts_finalize_subtest
+ 
+ 
+ if [ -x "/sbin/mkfs.btrfs" ]; then
++
+ 	$TS_CMD_WIPEFS -a  $DEVICE &> /dev/null
+ 	ts_log "Create filesystem [btrfs]"
+ 	/sbin/mkfs.btrfs -L "$LABEL" $DEVICE &> /dev/null
+ 	udevadm settle
+ 
+ 	mount -t btrfs $DEVICE $MOUNTPOINT &> /dev/null
+-	/sbin/btrfsctl -S sub $MOUNTPOINT &> /dev/null
+-	umount $MOUNTPOINT &> /dev/null
++
++	if [ -x "/sbin/btrfsctl" ]; then
++		/sbin/btrfsctl -S sub $MOUNTPOINT &> /dev/null
++	else
++		btrfs subvolume create $MOUNTPOINT/sub &> /dev/null
++	fi
++	umount $MOUNTPOINT #&> /dev/null
+ 
+ 	udevadm settle
+ 
+-- 
+2.7.4
+

@@ -1,0 +1,12 @@
+diff -up util-linux-2.23.2/misc-utils/uuidd.service.in.kzak util-linux-2.23.2/misc-utils/uuidd.service.in
+--- util-linux-2.23.2/misc-utils/uuidd.service.in.kzak	2013-02-27 17:46:29.903020913 +0100
++++ util-linux-2.23.2/misc-utils/uuidd.service.in	2015-04-20 11:31:44.614013049 +0200
+@@ -3,7 +3,7 @@ Description=Daemon for generating UUIDs
+ Requires=uuidd.socket
+ 
+ [Service]
+-ExecStart=@usrsbin_execdir@/uuidd --socket-activation --timeout 60
++ExecStart=@usrsbin_execdir@/uuidd --socket-activation
+ Restart=no
+ User=uuidd
+ Group=uuidd

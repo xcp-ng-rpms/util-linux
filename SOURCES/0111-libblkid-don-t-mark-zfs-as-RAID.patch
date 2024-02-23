@@ -1,0 +1,28 @@
+From 400facb19f228e3507de2137e2f9165b3365b7df Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Wed, 18 Nov 2015 11:55:35 +0100
+Subject: [PATCH 111/116] libblkid: don't mark zfs as RAID
+
+Upstream: https://github.com/karelzak/util-linux/commit/710dd492394be6cd2f3dd65c057ae7827ee6e89d
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1392661
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libblkid/src/superblocks/zfs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libblkid/src/superblocks/zfs.c b/libblkid/src/superblocks/zfs.c
+index 8e88b39..5074495 100644
+--- a/libblkid/src/superblocks/zfs.c
++++ b/libblkid/src/superblocks/zfs.c
+@@ -264,7 +264,7 @@ static int probe_zfs(blkid_probe pr, const struct blkid_idmag *mag)
+ const struct blkid_idinfo zfs_idinfo =
+ {
+ 	.name		= "zfs_member",
+-	.usage		= BLKID_USAGE_RAID,
++	.usage		= BLKID_USAGE_FILESYSTEM,
+ 	.probefunc	= probe_zfs,
+ 	.minsz		= 64 * 1024 * 1024,
+ 	.magics		= BLKID_NONE_MAGIC
+-- 
+2.9.3
+

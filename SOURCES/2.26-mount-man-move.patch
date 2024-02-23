@@ -1,0 +1,12 @@
+diff -up util-linux-2.23.2/sys-utils/mount.8.kzak util-linux-2.23.2/sys-utils/mount.8
+--- util-linux-2.23.2/sys-utils/mount.8.kzak	2014-09-25 11:03:25.492822164 +0200
++++ util-linux-2.23.2/sys-utils/mount.8	2014-09-25 11:04:00.102152375 +0200
+@@ -451,7 +451,7 @@ has to be a mountpoint.
+ 
+ Note that moving a mount residing under a shared mount is invalid and
+ unsupported. Use
+-.B findmnt -o TARGET,PROPAGATION /dir
++.B findmnt -o TARGET,PROPAGATION
+ to see the current propagation flags.
+ .RE
+ 

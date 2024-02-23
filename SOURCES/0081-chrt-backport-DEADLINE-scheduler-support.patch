@@ -1,0 +1,791 @@
+From 674769893bb8d5f1991c6a3e5d96337b37aeb86f Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 27 Jun 2016 14:14:28 +0200
+Subject: [PATCH 81/86] chrt: backport DEADLINE scheduler support
+
+Backport upstream commits:
+
+2e31d1c chrt: validate priority before trying to use it
+b3a5067 chrt: make --sched-* short options to require an argument
+a03eac5 chrt: restore removed ifdef SCHED_RESET_ON_FORK
+59e4a38 chrt: fix case SCHED_RR
+acde3a0 chrt: use sched_getattr()
+1a7e639 chrt: add support for SCHED_DEADLINE
+1516758 chrt: use sched_setattr() if available
+a6fec53 chrt: make usage more readable
+4820a73 chrt: set function refactoring
+a30cf65 chrt: output function refactoring
+7a4ea56 chrt: add control struct
+9acbe2a chrt: slice up the usage text and normalize its layout
+4e4bc0c chrt: make the usage synopsis clearer
+3fabc36 chrt: fix --help inconsistency
+451dbcf textual: add a docstring to most of the utilities
+a587cc5 textual: use manual tail usage() macro
+f627750 textual: use version printing macro everywhere
+a7560c0 textual: make the license of chrt and taskset slightly more explicit
+4ce393f textual: fix several typos and angular brackets in messages
+6f27e44 chrt: add fallback to be usable on kernels without sched_{get,set}attr
+
+* Fri Jul 01 2016 re-spin [kzak]:
+- add fallback for old glibc-headers without SYS_sched_{set,get}attr
+
+* Tue Jul 12 016 re-spin [kzak]:
+- add runtime fallback for systems without sched_{get,set}attr syscalls
+
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1298384
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ configure.ac      |  17 +-
+ m4/ul.m4          |   8 -
+ schedutils/chrt.c | 547 ++++++++++++++++++++++++++++++++++++++----------------
+ 3 files changed, 400 insertions(+), 172 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index fe0a011..266ef08 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -338,6 +338,8 @@ AC_CHECK_FUNCS([ \
+ 	scandirat \
+ 	setresgid \
+ 	setresuid \
++	sched_setattr \
++	sched_setscheduler \
+ 	sigqueue \
+ 	srandom \
+ 	strnchr \
+@@ -1383,6 +1385,20 @@ UL_REQUIRES_SYSCALL_CHECK([taskset],
+ AM_CONDITIONAL(BUILD_TASKSET, test "x$build_taskset" = xyes)
+ 
+ 
++have_schedsetter=no
++AS_IF([test "x$ac_cv_func_sched_setscheduler" = xyes], [have_schedsetter=yes],
++      [test "x$ac_cv_func_sched_setattr" = xyes], [have_schedsetter=yes])
++
++UL_BUILD_INIT([chrt], [check])
++UL_REQUIRES_BUILD([chrt], [schedutils])
++UL_REQUIRES_HAVE([chrt], [schedsetter], [sched_set functions])
++AM_CONDITIONAL([BUILD_CHRT], [test "x$build_chrt" = xyes])
++
++AS_IF([test "x$build_chrt" = xyes], [
++	UL_CHECK_SYSCALL([sched_setattr])
++])
++
++
+ AC_ARG_ENABLE([wall],
+   AS_HELP_STRING([--disable-wall], [do not build wall]),
+   [], enable_wall=yes
+@@ -1562,7 +1578,6 @@ AC_ARG_VAR([SOLIB_LDFLAGS],
+ 
+ LIBS=""
+ 
+-
+ AC_CONFIG_HEADERS(config.h)
+ 
+ #
+diff --git a/m4/ul.m4 b/m4/ul.m4
+index c0082d0..db44589 100644
+--- a/m4/ul.m4
++++ b/m4/ul.m4
+@@ -92,7 +92,6 @@ AC_DEFUN([UL_CHECK_SYSCALL], [
+       ])
+     ul_cv_syscall_$1=$syscall
+     ])
+-  AM_CONDITIONAL([HAVE_]m4_toupper($1), [test "x$ul_cv_syscall_$1" != xno])
+   case $ul_cv_syscall_$1 in #(
+   no) AC_MSG_WARN([Unable to detect syscall $1.]) ;;
+   SYS_*) ;;
+@@ -266,13 +265,6 @@ AC_DEFUN([UL_REQUIRES_SYSCALL_CHECK], [
+   m4_define([suffix], m4_default([$4],$1))
+   m4_define([callname], m4_default([$3],$1))
+ 
+-  dnl This is default, $3 will redefine the condition
+-  dnl
+-  dnl TODO: remove this junk, AM_CONDITIONAL should not be used for any HAVE_*
+-  dnl       variables, all we need is BUILD_* only.
+-  dnl
+-  AM_CONDITIONAL([HAVE_]m4_toupper(callname), [false])
+-
+   if test "x$[build_]suffix" != xno; then
+     if test "x$[enable_]suffix" = xno; then
+       [build_]suffix=no
+diff --git a/schedutils/chrt.c b/schedutils/chrt.c
+index 20df6fa..edae0d9 100644
+--- a/schedutils/chrt.c
++++ b/schedutils/chrt.c
+@@ -1,13 +1,11 @@
+ /*
+- * chrt.c - chrt
+- * Command-line utility for manipulating a task's real-time attributes 
++ * chrt.c - manipulate a task's real-time attributes
+  *
+- * Robert Love <rml@tech9.net>
+- * 27-Apr-2002: initial version
+- * 04-May-2011: make thread aware - Davidlohr Bueso <dave@gnu.org>
++ * 27-Apr-2002: initial version - Robert Love <rml@tech9.net>
++ * 04-May-2011: make it thread-aware - Davidlohr Bueso <dave@gnu.org>
+  *
+  * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License, v2, as
++ * it under the terms of the GNU General Public License, version 2, as
+  * published by the Free Software Foundation
+  *
+  * This program is distributed in the hope that it will be useful,
+@@ -50,108 +48,260 @@
+ # define SCHED_IDLE 5
+ #endif
+ 
++/* flag by sched_getscheduler() */
+ #if defined(__linux__) && !defined(SCHED_RESET_ON_FORK)
+-#define SCHED_RESET_ON_FORK 0x40000000
++# define SCHED_RESET_ON_FORK 0x40000000
+ #endif
+ 
++/* flag by sched_getattr() */
++#if defined(__linux__) && !defined(SCHED_FLAG_RESET_ON_FORK)
++# define SCHED_FLAG_RESET_ON_FORK 0x01
++#endif
+ 
+-static void __attribute__((__noreturn__)) show_usage(int rc)
+-{
+-	FILE *out = rc == EXIT_SUCCESS ? stdout : stderr;
++#if defined (__linux__) && !defined(HAVE_SCHED_SETATTR)
++# include <sys/syscall.h>
++#endif
+ 
+-	fprintf(out, _(
+-	"\nchrt - manipulate real-time attributes of a process\n"
+-	"\nSet policy:\n"
+-	"  chrt [options] [-policy] <priority> [-p <pid> | <command> <arg> ...]\n"
+-	"\nGet policy:\n"
+-	"  chrt [options] -p <pid>\n"));
+-
+-	fprintf(out, _(
+-	"\nScheduling policies:\n"
+-	"  -b | --batch         set policy to SCHED_BATCH\n"
+-	"  -f | --fifo          set policy to SCHED_FIFO\n"
+-	"  -i | --idle          set policy to SCHED_IDLE\n"
+-	"  -o | --other         set policy to SCHED_OTHER\n"
+-	"  -r | --rr            set policy to SCHED_RR (default)\n"));
++/* usable kernel-headers, but old glibc-headers */
++#if defined (__linux__) && !defined(SYS_sched_setattr) && defined(__NR_sched_setattr)
++# define SYS_sched_setattr __NR_sched_setattr
++#endif
+ 
+-#ifdef SCHED_RESET_ON_FORK
+-	fprintf(out, _(
+-	"\nScheduling flags:\n"
+-	"  -R | --reset-on-fork set SCHED_RESET_ON_FORK for FIFO or RR\n"));
++#if defined (__linux__) && !defined(SYS_sched_getattr) && defined(__NR_sched_getattr)
++# define SYS_sched_getattr __NR_sched_getattr
+ #endif
+-	fprintf(out, _(
+-	"\nOptions:\n"
+-	"  -a | --all-tasks     operate on all the tasks (threads) for a given pid\n"
+-	"  -h | --help          display this help\n"
+-	"  -m | --max           show min and max valid priorities\n"
+-	"  -p | --pid           operate on existing given pid\n"
+-	"  -v | --verbose       display status information\n"
+-	"  -V | --version       output version information\n\n"));
+ 
+-	exit(rc);
++#if defined (__linux__) && !defined(HAVE_SCHED_SETATTR) && defined(SYS_sched_setattr)
++# define HAVE_SCHED_SETATTR
++
++struct sched_attr {
++	uint32_t size;
++	uint32_t sched_policy;
++	uint64_t sched_flags;
++
++	/* SCHED_NORMAL, SCHED_BATCH */
++	int32_t sched_nice;
++
++	/* SCHED_FIFO, SCHED_RR */
++	uint32_t sched_priority;
++
++	/* SCHED_DEADLINE (nsec) */
++	uint64_t sched_runtime;
++	uint64_t sched_deadline;
++	uint64_t sched_period;
++};
++
++static int sched_setattr(pid_t pid, const struct sched_attr *attr, unsigned int flags)
++{
++	return syscall(SYS_sched_setattr, pid, attr, flags);
+ }
+ 
+-static void show_rt_info(pid_t pid, int isnew)
++static int sched_getattr(pid_t pid, struct sched_attr *attr, unsigned int size, unsigned int flags)
+ {
+-	struct sched_param sp;
+-	int policy;
++	return syscall(SYS_sched_getattr, pid, attr, size, flags);
++}
++#endif
+ 
+-	/* don't display "pid 0" as that is confusing */
+-	if (!pid)
+-		pid = getpid();
++/* the SCHED_DEADLINE is supported since Linux 3.14
++ * commit id aab03e05e8f7e26f51dee792beddcb5cca9215a5
++ * -- sched_setattr() is required for this policy!
++ */
++#if defined (__linux__) && !defined(SCHED_DEADLINE) && defined(HAVE_SCHED_SETATTR)
++# define SCHED_DEADLINE 6
++#endif
+ 
+-	policy = sched_getscheduler(pid);
+-	if (policy == -1)
+-		err(EXIT_FAILURE, _("failed to get pid %d's policy"), pid);
++/* control struct */
++struct chrt_ctl {
++	pid_t	pid;
++	int	policy;				/* SCHED_* */
++	int	priority;
+ 
+-	if (isnew)
+-		printf(_("pid %d's new scheduling policy: "), pid);
+-	else
+-		printf(_("pid %d's current scheduling policy: "), pid);
++	uint64_t runtime;			/* --sched-* options */
++	uint64_t deadline;
++	uint64_t period;
++
++	unsigned int all_tasks : 1,		/* all threads of the PID */
++		     reset_on_fork : 1,		/* SCHED_RESET_ON_FORK */
++		     altered : 1,		/* sched_set**() used */
++		     verbose : 1;		/* verbose output */
++};
++
++static void __attribute__((__noreturn__)) show_usage(int rc)
++{
++	FILE *out = rc == EXIT_SUCCESS ? stdout : stderr;
+ 
++	fputs(_("Show or change the real-time scheduling attributes of a process.\n"), out);
++	fputs(USAGE_SEPARATOR, out);
++	fputs(_("Set policy:\n"
++	" chrt [options] <priority> <command> [<arg>...]\n"
++	" chrt [options] --pid <priority> <pid>\n"), out);
++	fputs(USAGE_SEPARATOR, out);
++	fputs(_("Get policy:\n"
++	" chrt [options] -p <pid>\n"), out);
++
++	fputs(USAGE_SEPARATOR, out);
++	fputs(_("Policy options:\n"), out);
++	fputs(_(" -b, --batch          set policy to SCHED_BATCH\n"), out);
++	fputs(_(" -d, --deadline       set policy to SCHED_DEADLINE\n"), out);
++	fputs(_(" -f, --fifo           set policy to SCHED_FIFO\n"), out);
++	fputs(_(" -i, --idle           set policy to SCHED_IDLE\n"), out);
++	fputs(_(" -o, --other          set policy to SCHED_OTHER\n"), out);
++	fputs(_(" -r, --rr             set policy to SCHED_RR (default)\n"), out);
++
++	fputs(USAGE_SEPARATOR, out);
++	fputs(_("Scheduling options:\n"), out);
++	fputs(_(" -R, --reset-on-fork       set SCHED_RESET_ON_FORK for FIFO or RR\n"), out);
++	fputs(_(" -T, --sched-runtime <ns>  runtime parameter for DEADLINE\n"), out);
++	fputs(_(" -P, --sched-period <ns>   period parameter for DEADLINE\n"), out);
++	fputs(_(" -D, --sched-deadline <ns> deadline parameter for DEADLINE\n"), out);
++
++	fputs(USAGE_SEPARATOR, out);
++	fputs(_("Other options:\n"), out);
++	fputs(_(" -a, --all-tasks      operate on all the tasks (threads) for a given pid\n"), out);
++	fputs(_(" -m, --max            show min and max valid priorities\n"), out);
++	fputs(_(" -p, --pid            operate on existing given pid\n"), out);
++	fputs(_(" -v, --verbose        display status information\n"), out);
++
++	fputs(USAGE_SEPARATOR, out);
++	fputs(USAGE_HELP, out);
++	fputs(USAGE_VERSION, out);
++
++	fprintf(out, USAGE_MAN_TAIL("chrt(1)"));
++	exit(rc);
++}
++
++static const char *get_policy_name(int policy)
++{
+ 	switch (policy) {
+ 	case SCHED_OTHER:
+-		printf("SCHED_OTHER\n");
+-		break;
++		return "SCHED_OTHER";
+ 	case SCHED_FIFO:
+-		printf("SCHED_FIFO\n");
+-		break;
+ #ifdef SCHED_RESET_ON_FORK
+ 	case SCHED_FIFO | SCHED_RESET_ON_FORK:
+-		printf("SCHED_FIFO|SCHED_RESET_ON_FORK\n");
+-		break;
+ #endif
++		return "SCHED_FIFO";
+ #ifdef SCHED_IDLE
+ 	case SCHED_IDLE:
+-		printf("SCHED_IDLE\n");
+-		break;
++		return "SCHED_IDLE";
+ #endif
+ 	case SCHED_RR:
+-		printf("SCHED_RR\n");
+-		break;
+ #ifdef SCHED_RESET_ON_FORK
+ 	case SCHED_RR | SCHED_RESET_ON_FORK:
+-		printf("SCHED_RR|SCHED_RESET_ON_FORK\n");
+-		break;
+ #endif
++		return "SCHED_RR";
+ #ifdef SCHED_BATCH
+ 	case SCHED_BATCH:
+-		printf("SCHED_BATCH\n");
+-		break;
++		return "SCHED_BATCH";
++#endif
++#ifdef SCHED_DEADLINE
++	case SCHED_DEADLINE:
++		return "SCHED_DEADLINE";
+ #endif
+ 	default:
+-		warnx(_("unknown scheduling policy"));
++		break;
++	}
++
++	return _("unknown");
++}
++
++static void show_sched_pid_info(struct chrt_ctl *ctl, pid_t pid)
++{
++	int policy, reset_on_fork = 0, prio = 0;
++#ifdef SCHED_DEADLINE
++	uint64_t deadline = 0, runtime = 0, period = 0;
++#endif
++
++	/* don't display "pid 0" as that is confusing */
++	if (!pid)
++		pid = getpid();
++
++	errno = 0;
++
++	/*
++	 * New way
++	 */
++#ifdef HAVE_SCHED_SETATTR
++	{
++		struct sched_attr sa;
++
++		if (sched_getattr(pid, &sa, sizeof(sa), 0) != 0) {
++			if (errno == ENOSYS)
++				goto fallback;
++			err(EXIT_FAILURE, _("failed to get pid %d's policy"), pid);
++		}
++
++		policy = sa.sched_policy;
++		prio = sa.sched_priority;
++		reset_on_fork = sa.sched_flags & SCHED_FLAG_RESET_ON_FORK;
++		deadline = sa.sched_deadline;
++		runtime = sa.sched_runtime;
++		period = sa.sched_period;
+ 	}
++#endif
++
++	/*
++	 * Old way
++	 */
++fallback:
++	if (errno == ENOSYS) {
++		struct sched_param sp;
+ 
+-	if (sched_getparam(pid, &sp))
+-		err(EXIT_FAILURE, _("failed to get pid %d's attributes"), pid);
++		policy = sched_getscheduler(pid);
++		if (policy == -1)
++			err(EXIT_FAILURE, _("failed to get pid %d's policy"), pid);
+ 
+-	if (isnew)
+-		printf(_("pid %d's new scheduling priority: %d\n"),
+-		       pid, sp.sched_priority);
++		if (sched_getparam(pid, &sp) != 0)
++			err(EXIT_FAILURE, _("failed to get pid %d's attributes"), pid);
++		else
++			prio = sp.sched_priority;
++# ifdef SCHED_RESET_ON_FORK
++		if (policy == (SCHED_FIFO|SCHED_RESET_ON_FORK) || policy == (SCHED_BATCH|SCHED_RESET_ON_FORK))
++			reset_on_fork = 1;
++# endif
++	}
++
++	if (ctl->altered)
++		printf(_("pid %d's new scheduling policy: %s"), pid, get_policy_name(policy));
++	else
++		printf(_("pid %d's current scheduling policy: %s"), pid, get_policy_name(policy));
++
++	if (reset_on_fork)
++		printf("|SCHED_RESET_ON_FORK");
++	putchar('\n');
++
++	if (ctl->altered)
++		printf(_("pid %d's new scheduling priority: %d\n"), pid, prio);
+ 	else
+-		printf(_("pid %d's current scheduling priority: %d\n"),
+-		       pid, sp.sched_priority);
++		printf(_("pid %d's current scheduling priority: %d\n"), pid, prio);
++
++#ifdef SCHED_DEADLINE
++	if (policy == SCHED_DEADLINE) {
++		if (ctl->altered)
++			printf(_("pid %d's new runtime/deadline/period parameters: %ju/%ju/%ju\n"),
++					pid, runtime, deadline, period);
++		else
++			printf(_("pid %d's current runtime/deadline/period parameters: %ju/%ju/%ju\n"),
++					pid, runtime, deadline, period);
++	}
++#endif
++}
++
++
++static void show_sched_info(struct chrt_ctl *ctl)
++{
++	if (ctl->all_tasks) {
++		pid_t tid;
++		struct proc_tasks *ts = proc_open_tasks(ctl->pid);
++
++		if (!ts)
++			err(EXIT_FAILURE, _("cannot obtain the list of tasks"));
++
++		while (!proc_next_tid(ts, &tid))
++			show_sched_pid_info(ctl, tid);
++
++		proc_close_tasks(ts);
++	} else
++		show_sched_pid_info(ctl, ctl->pid);
+ }
+ 
+ static void show_min_max(void)
+@@ -167,52 +317,116 @@ static void show_min_max(void)
+ #ifdef SCHED_IDLE
+ 		SCHED_IDLE,
+ #endif
+-	};
+-	const char *names[] = {
+-		"OTHER",
+-		"FIFO",
+-		"RR",
+-#ifdef SCHED_BATCH
+-		"BATCH",
+-#endif
+-#ifdef SCHED_IDLE
+-		"IDLE",
++#ifdef SCHED_DEADLINE
++		SCHED_DEADLINE,
+ #endif
+ 	};
+ 
+ 	for (i = 0; i < ARRAY_SIZE(policies); i++) {
+-		int max = sched_get_priority_max(policies[i]);
+-		int min = sched_get_priority_min(policies[i]);
++		int plc = policies[i];
++		int max = sched_get_priority_max(plc);
++		int min = sched_get_priority_min(plc);
+ 
+ 		if (max >= 0 && min >= 0)
+-			printf(_("SCHED_%s min/max priority\t: %d/%d\n"),
+-					names[i], min, max);
++			printf(_("%s min/max priority\t: %d/%d\n"),
++					get_policy_name(plc), min, max);
+ 		else
+-			printf(_("SCHED_%s not supported?\n"), names[i]);
++			printf(_("%s not supported?\n"), get_policy_name(plc));
+ 	}
+ }
+ 
++static int set_sched_one_by_setscheduler(struct chrt_ctl *ctl, pid_t pid)
++{
++	struct sched_param sp = { .sched_priority = ctl->priority };
++	int policy = ctl->policy;
++
++# ifdef SCHED_RESET_ON_FORK
++	if (ctl->reset_on_fork)
++		policy |= SCHED_RESET_ON_FORK;
++# endif
++	return sched_setscheduler(pid, policy, &sp);
++}
++
++
++#ifndef HAVE_SCHED_SETATTR
++static int set_sched_one(struct chrt_ctl *ctl, pid_t pid)
++{
++	return set_sched_one_by_setscheduler(ctl, pid);
++}
++
++#else /* !HAVE_SCHED_SETATTR */
++static int set_sched_one(struct chrt_ctl *ctl, pid_t pid)
++{
++	/* use main() to check if the setting makes sense */
++	struct sched_attr sa = {
++		.size		= sizeof(struct sched_attr),
++		.sched_policy	= ctl->policy,
++		.sched_priority	= ctl->priority,
++		.sched_runtime  = ctl->runtime,
++		.sched_period   = ctl->period,
++		.sched_deadline = ctl->deadline
++	};
++	int rc;
++
++# ifdef SCHED_RESET_ON_FORK
++	if (ctl->reset_on_fork)
++		sa.sched_flags |= SCHED_RESET_ON_FORK;
++# endif
++	errno = 0;
++	rc = sched_setattr(pid, &sa, 0);
++
++	if (rc != 0 && errno == ENOSYS && ctl->policy != SCHED_DEADLINE)
++		/* fallback -- build with new kernel/libc, but executed on old kernels */
++		rc = set_sched_one_by_setscheduler(ctl, pid);
++
++	return rc;
++}
++#endif /* HAVE_SCHED_SETATTR */
++
++static void set_sched(struct chrt_ctl *ctl)
++{
++	if (ctl->all_tasks) {
++		pid_t tid;
++		struct proc_tasks *ts = proc_open_tasks(ctl->pid);
++
++		if (!ts)
++			err(EXIT_FAILURE, _("cannot obtain the list of tasks"));
++
++		while (!proc_next_tid(ts, &tid))
++			if (set_sched_one(ctl, tid) == -1)
++				err(EXIT_FAILURE, _("failed to set tid %d's policy"), tid);
++
++		proc_close_tasks(ts);
++
++	} else if (set_sched_one(ctl, ctl->pid) == -1)
++		err(EXIT_FAILURE, _("failed to set pid %d's policy"), ctl->pid);
++
++	ctl->altered = 1;
++}
++
+ int main(int argc, char **argv)
+ {
+-	int i, policy = SCHED_RR, priority = 0, verbose = 0, policy_flag = 0,
+-	    all_tasks = 0;
+-	struct sched_param sp;
+-	pid_t pid = -1;
++	struct chrt_ctl _ctl = { .pid = -1 }, *ctl = &_ctl;
++	int c;
+ 
+ 	static const struct option longopts[] = {
+-		{ "all-tasks",  0, NULL, 'a' },
+-		{ "batch",	0, NULL, 'b' },
+-		{ "fifo",	0, NULL, 'f' },
+-		{ "idle",	0, NULL, 'i' },
+-		{ "pid",	0, NULL, 'p' },
+-		{ "help",	0, NULL, 'h' },
+-		{ "max",        0, NULL, 'm' },
+-		{ "other",	0, NULL, 'o' },
+-		{ "rr",		0, NULL, 'r' },
+-		{ "reset-on-fork", 0, NULL, 'R' },
+-		{ "verbose",	0, NULL, 'v' },
+-		{ "version",	0, NULL, 'V' },
+-		{ NULL,		0, NULL, 0 }
++		{ "all-tasks",  no_argument, NULL, 'a' },
++		{ "batch",	no_argument, NULL, 'b' },
++		{ "deadline",   no_argument, NULL, 'd' },
++		{ "fifo",	no_argument, NULL, 'f' },
++		{ "idle",	no_argument, NULL, 'i' },
++		{ "pid",	no_argument, NULL, 'p' },
++		{ "help",	no_argument, NULL, 'h' },
++		{ "max",        no_argument, NULL, 'm' },
++		{ "other",	no_argument, NULL, 'o' },
++		{ "rr",		no_argument, NULL, 'r' },
++		{ "sched-runtime",  required_argument, NULL, 'T' },
++		{ "sched-period",   required_argument, NULL, 'P' },
++		{ "sched-deadline", required_argument, NULL, 'D' },
++		{ "reset-on-fork",  no_argument,       NULL, 'R' },
++		{ "verbose",	no_argument, NULL, 'v' },
++		{ "version",	no_argument, NULL, 'V' },
++		{ NULL,		no_argument, NULL, 0 }
+ 	};
+ 
+ 	setlocale(LC_ALL, "");
+@@ -220,51 +434,63 @@ int main(int argc, char **argv)
+ 	textdomain(PACKAGE);
+ 	atexit(close_stdout);
+ 
+-	while((i = getopt_long(argc, argv, "+abfiphmoRrvV", longopts, NULL)) != -1)
++	while((c = getopt_long(argc, argv, "+abdD:fiphmoP:T:rRvV", longopts, NULL)) != -1)
+ 	{
+ 		int ret = EXIT_FAILURE;
+ 
+-		switch (i) {
++		switch (c) {
+ 		case 'a':
+-			all_tasks = 1;
++			ctl->all_tasks = 1;
+ 			break;
+ 		case 'b':
+ #ifdef SCHED_BATCH
+-			policy = SCHED_BATCH;
++			ctl->policy = SCHED_BATCH;
++#endif
++			break;
++
++		case 'd':
++#ifdef SCHED_DEADLINE
++			ctl->policy = SCHED_DEADLINE;
+ #endif
+ 			break;
+ 		case 'f':
+-			policy = SCHED_FIFO;
++			ctl->policy = SCHED_FIFO;
+ 			break;
+ 		case 'R':
+-#ifdef SCHED_RESET_ON_FORK
+-			policy_flag |= SCHED_RESET_ON_FORK;
+-#endif
++			ctl->reset_on_fork = 1;
+ 			break;
+ 		case 'i':
+ #ifdef SCHED_IDLE
+-			policy = SCHED_IDLE;
++			ctl->policy = SCHED_IDLE;
+ #endif
+ 			break;
+ 		case 'm':
+ 			show_min_max();
+ 			return EXIT_SUCCESS;
+ 		case 'o':
+-			policy = SCHED_OTHER;
++			ctl->policy = SCHED_OTHER;
+ 			break;
+ 		case 'p':
+ 			errno = 0;
+-			pid = strtos32_or_err(argv[argc - 1], _("invalid PID argument"));
++			ctl->pid = strtos32_or_err(argv[argc - 1], _("invalid PID argument"));
+ 			break;
+ 		case 'r':
+-			policy = SCHED_RR;
++			ctl->policy = SCHED_RR;
+ 			break;
+ 		case 'v':
+-			verbose = 1;
++			ctl->verbose = 1;
++			break;
++		case 'T':
++			ctl->runtime = strtou64_or_err(optarg, _("invalid runtime argument"));
++			break;
++		case 'P':
++			ctl->period = strtou64_or_err(optarg, _("invalid period argument"));
++			break;
++		case 'D':
++			ctl->deadline = strtou64_or_err(optarg, _("invalid deadline argument"));
+ 			break;
+ 		case 'V':
+-			printf(_("%s from %s\n"), program_invocation_short_name,
+-			       PACKAGE_STRING);
++			printf(UTIL_LINUX_VERSION);
+ 			return EXIT_SUCCESS;
+ 		case 'h':
+ 			ret = EXIT_SUCCESS;
+@@ -274,61 +500,56 @@ int main(int argc, char **argv)
+ 		}
+ 	}
+ 
+-	if (((pid > -1) && argc - optind < 1) ||
+-	    ((pid == -1) && argc - optind < 2))
++	if (((ctl->pid > -1) && argc - optind < 1) ||
++	    ((ctl->pid == -1) && argc - optind < 2))
+ 		show_usage(EXIT_FAILURE);
+ 
+-	if ((pid > -1) && (verbose || argc - optind == 1)) {
+-		if (all_tasks) {
+-			pid_t tid;
+-			struct proc_tasks *ts = proc_open_tasks(pid);
+-
+-			if (!ts)
+-				err(EXIT_FAILURE, _("cannot obtain the list of tasks"));
+-			while (!proc_next_tid(ts, &tid))
+-				show_rt_info(tid, FALSE);
+-			proc_close_tasks(ts);
+-		} else
+-			show_rt_info(pid, FALSE);
+-
++	if ((ctl->pid > -1) && (ctl->verbose || argc - optind == 1)) {
++		show_sched_info(ctl);
+ 		if (argc - optind == 1)
+ 			return EXIT_SUCCESS;
+ 	}
+ 
+ 	errno = 0;
+-	priority = strtos32_or_err(argv[optind], _("invalid priority argument"));
++	ctl->priority = strtos32_or_err(argv[optind], _("invalid priority argument"));
+ 
+ #ifdef SCHED_RESET_ON_FORK
+-	/* sanity check */
+-	if ((policy_flag & SCHED_RESET_ON_FORK) &&
+-	    !(policy == SCHED_FIFO || policy == SCHED_RR))
+-		errx(EXIT_FAILURE, _("SCHED_RESET_ON_FORK flag is supported for "
++	if (ctl->reset_on_fork && ctl->policy != SCHED_FIFO && ctl->policy != SCHED_RR)
++		errx(EXIT_FAILURE, _("--reset-on-fork option is supported for "
+ 				     "SCHED_FIFO and SCHED_RR policies only"));
+ #endif
+-
+-	policy |= policy_flag;
+-
+-	if (pid == -1)
+-		pid = 0;
+-	sp.sched_priority = priority;
+-
+-	if (all_tasks) {
+-		pid_t tid;
+-		struct proc_tasks *ts = proc_open_tasks(pid);
+-
+-		if (!ts)
+-			err(EXIT_FAILURE, _("cannot obtain the list of tasks"));
+-		while (!proc_next_tid(ts, &tid))
+-			if (sched_setscheduler(tid, policy, &sp) == -1)
+-				err(EXIT_FAILURE, _("failed to set tid %d's policy"), tid);
+-		proc_close_tasks(ts);
+-	} else if (sched_setscheduler(pid, policy, &sp) == -1)
+-		err(EXIT_FAILURE, _("failed to set pid %d's policy"), pid);
+-
+-	if (verbose)
+-		show_rt_info(pid, TRUE);
+-
+-	if (!pid) {
++#ifdef SCHED_DEADLINE
++	if ((ctl->runtime || ctl->deadline || ctl->period) && ctl->policy != SCHED_DEADLINE)
++		errx(EXIT_FAILURE, _("--sched-{runtime,deadline,period} options "
++				     "are supported for SCHED_DEADLINE only"));
++	if (ctl->policy == SCHED_DEADLINE) {
++		/* The basic rule is runtime <= deadline <= period, so we can
++		 * make deadline and runtime optional on command line. Note we
++		 * don't check any values or set any defaults, it's kernel
++		 * responsibility.
++		 */
++		if (ctl->deadline == 0)
++			ctl->deadline = ctl->period;
++		if (ctl->runtime == 0)
++			ctl->runtime = ctl->deadline;
++	}
++#else
++	if (ctl->runtime || ctl->deadline || ctl->period)
++		errx(EXIT_FAILURE, _("SCHED_DEADLINE is unsupported"));
++#endif
++	if (ctl->pid == -1)
++		ctl->pid = 0;
++	if (ctl->priority < sched_get_priority_min(ctl->policy) ||
++	    sched_get_priority_max(ctl->policy) < ctl->priority)
++		errx(EXIT_FAILURE,
++		     _("unsupported priority value for the policy: %d: see --max for valid range"),
++		     ctl->priority);
++	set_sched(ctl);
++
++	if (ctl->verbose)
++		show_sched_info(ctl);
++
++	if (!ctl->pid) {
+ 		argv += optind + 1;
+ 		execvp(argv[0], argv);
+ 		err(EXIT_FAILURE, _("failed to execute %s"), argv[0]);
+-- 
+2.7.4
+

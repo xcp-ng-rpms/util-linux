@@ -1,0 +1,42 @@
+From 7ab32ae64d05f018c171ba1525bc337805d84391 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Fri, 11 Oct 2013 11:16:23 +0200
+Subject: [PATCH] blockdev: add note about --setbsz usability
+
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ disk-utils/blockdev.8 | 4 +++-
+ disk-utils/blockdev.c | 2 +-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/disk-utils/blockdev.8 b/disk-utils/blockdev.8
+index 2b3d64c..f4282da 100644
+--- a/disk-utils/blockdev.8
++++ b/disk-utils/blockdev.8
+@@ -68,7 +68,9 @@ Get size in 512-byte sectors.
+ .IP "\fB\-\-rereadpt\fP"
+ Reread partition table
+ .IP "\fB\-\-setbsz\fP \fIbytes\fP"
+-Set blocksize.
++Set blocksize. Note that the block size is specific to the current file
++descriptor opening the block device, so the change of block size only persists
++for as long as blockdev has the device open, and is lost once blockdev exits.
+ .IP "\fB\-\-setfra\fP \fIsectors\fP"
+ Set filesystem readahead (same like --setra on 2.6 kernels).
+ .IP "\fB\-\-setra\fP \fIsectors\fP"
+diff --git a/disk-utils/blockdev.c b/disk-utils/blockdev.c
+index 4543818..d030217 100644
+--- a/disk-utils/blockdev.c
++++ b/disk-utils/blockdev.c
+@@ -127,7 +127,7 @@ static const struct bdc bdcms[] =
+ 		.argname = "<bytes>",
+ 		.argtype = ARG_INT,
+ 		.flags = FL_NORESULT,
+-	        .help = N_("set blocksize")
++	        .help = N_("set blocksize on file descriptor opening the block device")
+ 	},{
+ 		IOCTL_ENTRY(BLKGETSIZE),
+ 		.name = "--getsize",
+-- 
+1.8.3.1
+

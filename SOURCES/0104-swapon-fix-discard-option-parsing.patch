@@ -1,0 +1,44 @@
+From 294a277fceb5cd6640a9b7a6e8af7b2567150f34 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 20 Mar 2017 12:03:40 +0100
+Subject: [PATCH 104/116] swapon: fix discard option parsing
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1378100
+Upstream: https://github.com/karelzak/util-linux/commit/07332bfa1ec122a251194a62f91319841121d5aa
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/swapon.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/sys-utils/swapon.c b/sys-utils/swapon.c
+index d85b910..d4f2c08 100644
+--- a/sys-utils/swapon.c
++++ b/sys-utils/swapon.c
+@@ -632,20 +632,21 @@ static int swapon_all(void)
+ 
+ 	while (mnt_table_find_next_fs(tb, itr, match_swap, NULL, &fs) == 0) {
+ 		/* defaults */
++		size_t argsz = 0;
+ 		int pri = priority, dsc = discard, nofail = ifexists;
+ 		char *p, *src, *dscarg;
+ 
+ 		if (mnt_fs_get_option(fs, "noauto", NULL, NULL) == 0)
+ 			continue;
+-		if (mnt_fs_get_option(fs, "discard", &dscarg, NULL) == 0) {
++		if (mnt_fs_get_option(fs, "discard", &dscarg, &argsz) == 0) {
+ 			dsc |= SWAP_FLAG_DISCARD;
+ 			if (dscarg) {
+ 				/* only single-time discards are wanted */
+-				if (strcmp(dscarg, "once") == 0)
++				if (strncmp(dscarg, "once", argsz) == 0)
+ 					dsc |= SWAP_FLAG_DISCARD_ONCE;
+ 
+ 				/* do discard for every released swap page */
+-				if (strcmp(dscarg, "pages") == 0)
++				if (strncmp(dscarg, "pages", argsz) == 0)
+ 					dsc |= SWAP_FLAG_DISCARD_PAGES;
+ 			}
+ 		}
+-- 
+2.9.3
+

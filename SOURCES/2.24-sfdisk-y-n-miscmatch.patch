@@ -1,0 +1,15 @@
+diff -up util-linux-2.23.2/fdisks/sfdisk.c.kzak util-linux-2.23.2/fdisks/sfdisk.c
+--- util-linux-2.23.2/fdisks/sfdisk.c.kzak	2013-07-30 10:39:26.200738180 +0200
++++ util-linux-2.23.2/fdisks/sfdisk.c	2013-10-07 11:52:10.701445115 +0200
+@@ -3201,9 +3201,9 @@ do_fdisk(char *dev) {
+ 	    ignore_result( fgets(answer, sizeof(answer), stdin) );
+ 	    if (answer[0] == 'q' || answer[0] == 'Q') {
+ 		errx(EXIT_FAILURE, _("Quitting - nothing changed"));
+-	    } else if (rpmatch(answer) == 1) {
+-		continue;
+ 	    } else if (rpmatch(answer) == 0) {
++		continue;
++	    } else if (rpmatch(answer) == 1) {
+ 		break;
+ 	    } else {
+ 		printf(_("Please answer one of y,n,q\n"));

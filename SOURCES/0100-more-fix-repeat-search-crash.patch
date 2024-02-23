@@ -1,0 +1,41 @@
+From d7e6a773863ad47dbdab9244b6629590d4b46f0e Mon Sep 17 00:00:00 2001
+From: Sami Kerola <kerolasa@iki.fi>
+Date: Tue, 27 Jan 2015 22:28:57 +0000
+Subject: [PATCH 100/116] more: fix repeat search crash
+
+Repeating a search for a pattern that did not found made more(1) to
+crash.  To reproduce 'more /etc/services' and search for 'doom'; you will
+find a service in port 666 - pressing '.' after that result used to cause
+core dump.
+
+Upstream: https://github.com/karelzak/util-linux/commit/bc1ed338814f69473629b04c5e9efae5d7db3b72
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1403973
+Signed-off-by: Sami Kerola <kerolasa@iki.fi>
+---
+ text-utils/more.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/text-utils/more.c b/text-utils/more.c
+index 496b116..0e9c2bd 100644
+--- a/text-utils/more.c
++++ b/text-utils/more.c
+@@ -1588,6 +1588,8 @@ void search(char buf[], FILE *file, register int n)
+ 	context.line = saveln = Currline;
+ 	context.chrctr = startline;
+ 	lncount = 0;
++	if (!buf)
++		goto notfound;
+ 	if ((rc = regcomp(&re, buf, REG_NOSUB)) != 0) {
+ 		char s[REGERR_BUF];
+ 		regerror(rc, &re, s, sizeof s);
+@@ -1644,6 +1646,7 @@ void search(char buf[], FILE *file, register int n)
+ 		}
+ 		free(previousre);
+ 		previousre = NULL;
++notfound:
+ 		more_error(_("Pattern not found"));
+ 	}
+ }
+-- 
+2.9.3
+

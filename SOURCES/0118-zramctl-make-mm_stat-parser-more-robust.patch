@@ -1,0 +1,38 @@
+From a7f11e525e9dd5abf844ada0ddd0ae74950e2e40 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 30 Mar 2017 12:10:01 +0200
+Subject: [PATCH] zramctl: make mm_stat parser more robust
+
+Let's fallback to attribute files if mm_stat file is incomplete. It
+should not happen, but I have seen RHEL7 kernel where is no
+num_migrated/pages_compacted attribute...
+
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1358755
+Upstream: http://github.com/karelzak/util-linux/commit/2546d54bd8b0ceac75d6d7e6c483479022d97509
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/zramctl.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/sys-utils/zramctl.c b/sys-utils/zramctl.c
+index 853401c..c3112d6 100644
+--- a/sys-utils/zramctl.c
++++ b/sys-utils/zramctl.c
+@@ -359,8 +359,12 @@ static char *get_mm_stat(struct zram *z, size_t idx, int bytes)
+ 		str = sysfs_strdup(sysfs, "mm_stat");
+ 		if (str) {
+ 			z->mm_stat = strv_split(str, " ");
+-			if (strv_length(z->mm_stat) < ARRAY_SIZE(mm_stat_names))
+-				errx(EXIT_FAILURE, _("Failed to parse mm_stat"));
++
++			/* make sure kernel provides mm_stat as expected */
++			if (strv_length(z->mm_stat) < ARRAY_SIZE(mm_stat_names)) {
++				strv_free(z->mm_stat);
++				z->mm_stat = NULL;
++			}
+ 		}
+ 		z->mm_stat_probed = 1;
+ 		free(str);
+-- 
+2.9.3
+

@@ -1,0 +1,44 @@
+From 4150eb1025c059f9459f98ef6c6c3fac730eaf93 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 1 Jun 2017 12:07:41 +0200
+Subject: [PATCH] lscpu: improve for offline CPUs on AMD
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1457744
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/lscpu.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/sys-utils/lscpu.c b/sys-utils/lscpu.c
+index 683fd66..1ee73f3 100644
+--- a/sys-utils/lscpu.c
++++ b/sys-utils/lscpu.c
+@@ -1550,11 +1550,11 @@ get_cell_data(struct lscpu_desc *desc, int idx, int col,
+ 				 is_cpu_online(desc, cpu) ? _("yes") : _("no"));
+ 		break;
+ 	case COL_MAXMHZ:
+-		if (desc->maxmhz)
++		if (desc->maxmhz && desc->maxmhz[idx])
+ 			xstrncpy(buf, desc->maxmhz[idx], bufsz);
+ 		break;
+ 	case COL_MINMHZ:
+-		if (desc->minmhz)
++		if (desc->minmhz && desc->minmhz[idx])
+ 			xstrncpy(buf, desc->minmhz[idx], bufsz);
+ 		break;
+ 	}
+@@ -1897,9 +1897,9 @@ print_summary(struct lscpu_desc *desc, struct lscpu_modifier *mod)
+ 		print_s(_("CPU dynamic MHz:"), desc->dynamic_mhz);
+ 	if (desc->static_mhz)
+ 		print_s(_("CPU static MHz:"), desc->static_mhz);
+-	if (desc->maxmhz)
++	if (desc->maxmhz && desc->maxmhz[0])
+ 		print_s(_("CPU max MHz:"), desc->maxmhz[0]);
+-	if (desc->minmhz)
++	if (desc->minmhz && desc->minmhz[0])
+ 		print_s(_("CPU min MHz:"), desc->minmhz[0]);
+ 	if (desc->bogomips)
+ 		print_s(_("BogoMIPS:"), desc->bogomips);
+-- 
+2.9.4
+

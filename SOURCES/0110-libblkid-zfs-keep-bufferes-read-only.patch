@@ -1,0 +1,48 @@
+From eeb629102da9a9a916d201bbd5f13ee7ad23844d Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 22 Sep 2015 15:27:39 +0200
+Subject: [PATCH 110/116] libblkid: (zfs) keep bufferes read-only
+
+Upstream: https://github.com/karelzak/util-linux/commit/9325a8be9e55cc01d9f580e14dd2193829245183
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1392661
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libblkid/src/superblocks/zfs.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/libblkid/src/superblocks/zfs.c b/libblkid/src/superblocks/zfs.c
+index 9b5601e..8e88b39 100644
+--- a/libblkid/src/superblocks/zfs.c
++++ b/libblkid/src/superblocks/zfs.c
+@@ -70,9 +70,10 @@ struct nvlist {
+ 
+ static void zfs_extract_guid_name(blkid_probe pr, loff_t offset)
+ {
++	unsigned char *p, buff[4096];
+ 	struct nvlist *nvl;
+ 	struct nvpair *nvp;
+-	size_t left = 4096;
++	size_t left = sizeof(buff);
+ 	int found = 0;
+ 
+ 	offset = (offset & ~(VDEV_LABEL_SIZE - 1)) + VDEV_LABEL_NVPAIR;
+@@ -81,10 +82,14 @@ static void zfs_extract_guid_name(blkid_probe pr, loff_t offset)
+ 	 * the first 4k (left) of the nvlist.  This is true for all pools
+ 	 * I've seen, and simplifies this code somewhat, because we don't
+ 	 * have to handle an nvpair crossing a buffer boundary. */
+-	nvl = (struct nvlist *)blkid_probe_get_buffer(pr, offset, left);
+-	if (nvl == NULL)
++	p = blkid_probe_get_buffer(pr, offset, left);
++	if (!p)
+ 		return;
+ 
++	/* libblkid buffers are strictly readonly, but the code below modifies nvpair etc. */
++	memcpy(buff, p, sizeof(buff));
++	nvl = (struct nvlist *) buff;
++
+ 	nvdebug("zfs_extract: nvlist offset %llu\n", offset);
+ 
+ 	nvp = &nvl->nvl_nvpair;
+-- 
+2.9.3
+

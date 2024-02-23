@@ -1,0 +1,496 @@
+diff -up util-linux-2.23.2/libmount/src/libmount.h.in.kzak util-linux-2.23.2/libmount/src/libmount.h.in
+--- util-linux-2.23.2/libmount/src/libmount.h.in.kzak	2015-06-23 11:54:00.510210784 +0200
++++ util-linux-2.23.2/libmount/src/libmount.h.in	2015-06-23 11:54:58.592785482 +0200
+@@ -420,6 +420,15 @@ extern int mnt_table_get_root_fs(struct
+ extern int mnt_table_set_iter(struct libmnt_table *tb, struct libmnt_iter *itr,
+ 			      struct libmnt_fs *fs);
+ 
++enum {
++	MNT_UNIQ_FORWARD  = (1 << 1),	/* default is backward */
++	MNT_UNIQ_KEEPTREE = (1 << 2)
++};
++extern int mnt_table_uniq_fs(struct libmnt_table *tb, int flags,
++				int (*cmp)(struct libmnt_table *,
++					   struct libmnt_fs *,
++					   struct libmnt_fs *));
++
+ extern struct libmnt_fs *mnt_table_find_mountpoint(struct libmnt_table *tb,
+ 				const char *path, int direction);
+ extern struct libmnt_fs *mnt_table_find_target(struct libmnt_table *tb,
+diff -up util-linux-2.23.2/libmount/src/libmount.sym.kzak util-linux-2.23.2/libmount/src/libmount.sym
+--- util-linux-2.23.2/libmount/src/libmount.sym.kzak	2015-06-23 11:56:47.259989779 +0200
++++ util-linux-2.23.2/libmount/src/libmount.sym	2015-06-23 11:56:17.681206366 +0200
+@@ -256,3 +256,9 @@ global:
+ 	mnt_context_find_umount_fs;
+ 	mnt_table_find_mountpoint;
+ } MOUNT_2.22;
++
++/* backport from v2.25 to RHEL7 */
++MOUNT_2.25 {
++	mnt_table_uniq_fs;
++} MOUNT_2.23;
++
+diff -up util-linux-2.23.2/libmount/src/tab.c.kzak util-linux-2.23.2/libmount/src/tab.c
+--- util-linux-2.23.2/libmount/src/tab.c.kzak	2015-06-23 11:52:04.750058424 +0200
++++ util-linux-2.23.2/libmount/src/tab.c	2015-06-23 11:53:26.109462680 +0200
+@@ -398,6 +398,93 @@ int mnt_table_find_next_fs(struct libmnt
+ 	return 1;
+ }
+ 
++static int mnt_table_move_parent(struct libmnt_table *tb, int oldid, int newid)
++{
++	struct libmnt_iter itr;
++	struct libmnt_fs *fs;
++
++	if (!tb)
++		return -EINVAL;
++	if (list_empty(&tb->ents))
++		return 0;
++
++
++	mnt_reset_iter(&itr, MNT_ITER_FORWARD);
++
++	while (mnt_table_next_fs(tb, &itr, &fs) == 0) {
++		if (fs->parent == oldid)
++			fs->parent = newid;
++	}
++	return 0;
++}
++
++/**
++ * mnt_table_uniq_fs:
++ * @tb: table
++ * @flags: MNT_UNIQ_*
++ * @cmp: function to compare filesystems
++ *
++ * This function de-duplicate the @tb, but does not change order of the
++ * filesystems. The @cmp function has to return 0 if the filesystems are
++ * equal, otherwise non-zero.
++ *
++ * The default is to keep in the table later mounted filesystems (function uses
++ * backward mode iterator).
++ *
++ * @MNT_UNIQ_FORWARD:  remove later mounted filesystems
++ * @MNT_UNIQ_KEEPTREE: keep parent->id relation ship stil valid
++ *
++ * Returns: negative number in case of error, or 0 o success.
++ */
++int mnt_table_uniq_fs(struct libmnt_table *tb, int flags,
++				int (*cmp)(struct libmnt_table *,
++					   struct libmnt_fs *,
++					   struct libmnt_fs *))
++{
++	struct libmnt_iter itr;
++	struct libmnt_fs *fs;
++	int direction = MNT_ITER_BACKWARD;
++
++	if (!tb || !cmp)
++		return -EINVAL;
++	if (list_empty(&tb->ents))
++		return 0;
++
++	if (flags & MNT_UNIQ_FORWARD)
++		direction = MNT_ITER_FORWARD;
++
++
++	mnt_reset_iter(&itr, direction);
++
++	if ((flags & MNT_UNIQ_KEEPTREE) && !is_mountinfo(tb))
++		flags &= ~MNT_UNIQ_KEEPTREE;
++
++	while (mnt_table_next_fs(tb, &itr, &fs) == 0) {
++		int want = 1;
++		struct libmnt_iter xtr;
++		struct libmnt_fs *x;
++
++		mnt_reset_iter(&xtr, direction);
++		while (want && mnt_table_next_fs(tb, &xtr, &x) == 0) {
++			if (fs == x)
++				break;
++			want = cmp(tb, x, fs) != 0;
++		}
++
++		if (!want) {
++			if (flags & MNT_UNIQ_KEEPTREE)
++				mnt_table_move_parent(tb, mnt_fs_get_id(fs),
++							  mnt_fs_get_parent_id(fs));
++
++
++
++			mnt_table_remove_fs(tb, fs);
++		}
++	}
++
++	return 0;
++}
++
+ /**
+  * mnt_table_set_iter:
+  * @tb: tab pointer
+diff -up util-linux-2.23.2/sys-utils/fstrim.c.kzak util-linux-2.23.2/sys-utils/fstrim.c
+--- util-linux-2.23.2/sys-utils/fstrim.c.kzak	2013-06-13 09:46:10.535651605 +0200
++++ util-linux-2.23.2/sys-utils/fstrim.c	2015-06-23 11:57:59.435461283 +0200
+@@ -41,6 +41,11 @@
+ #include "strutils.h"
+ #include "c.h"
+ #include "closestream.h"
++#include "pathnames.h"
++#include "sysfs.h"
++#include "exitcodes.h"
++
++#include <libmount.h>
+ 
+ #ifndef FITRIM
+ struct fstrim_range {
+@@ -51,16 +56,216 @@ struct fstrim_range {
+ #define FITRIM		_IOWR('X', 121, struct fstrim_range)
+ #endif
+ 
++/* returns: 0 = success, 1 = unsupported, < 0 = error */
++static int fstrim_filesystem(const char *path, struct fstrim_range *rangetpl,
++			    int verbose)
++{
++	int fd;
++	struct stat sb;
++	struct fstrim_range range;
++
++	/* kernel modifies the range */
++	memcpy(&range, rangetpl, sizeof(range));
++
++	fd = open(path, O_RDONLY);
++	if (fd < 0) {
++		warn(_("cannot open %s"), path);
++		return -1;
++	}
++	if (fstat(fd, &sb) == -1) {
++		warn(_("stat of %s failed"), path);
++		return -1;
++	}
++	if (!S_ISDIR(sb.st_mode)) {
++		warnx(_("%s: not a directory"), path);
++		return -1;
++	}
++	errno = 0;
++	if (ioctl(fd, FITRIM, &range)) {
++		int rc = errno == EOPNOTSUPP || errno == ENOTTY ? 1 : -1;
++
++		if (rc != 1)
++			warn(_("%s: FITRIM ioctl failed"), path);
++		close(fd);
++		return rc;
++	}
++
++	if (verbose) {
++		char *str = size_to_human_string(
++				SIZE_SUFFIX_3LETTER | SIZE_SUFFIX_SPACE,
++				(uint64_t) range.len);
++		/* TRANSLATORS: The standard value here is a very large number. */
++		printf(_("%s: %s (%" PRIu64 " bytes) trimmed\n"),
++				path, str, (uint64_t) range.len);
++		free(str);
++	}
++	close(fd);
++	return 0;
++}
++
++static int has_discard(const char *devname, struct sysfs_cxt *wholedisk)
++{
++	struct sysfs_cxt cxt, *parent = NULL;
++	uint64_t dg = 0;
++	dev_t disk = 0, dev;
++	int rc;
++
++	dev = sysfs_devname_to_devno(devname, NULL);
++	if (!dev)
++		return 1;
++	/*
++	 * This is tricky to read the info from sys/, because the queue
++	 * atrributes are provided for whole devices (disk) only. We're trying
++	 * to reuse the whole-disk sysfs context to optimize this stuff (as
++	 * system usually have just one disk only).
++	 */
++	if (sysfs_devno_to_wholedisk(dev, NULL, 0, &disk) || !disk)
++		return 1;
++	if (dev != disk) {
++		if (wholedisk->devno != disk) {
++			sysfs_deinit(wholedisk);
++			if (sysfs_init(wholedisk, disk, NULL))
++				return 1;
++		}
++		parent = wholedisk;
++	}
++
++	rc = sysfs_init(&cxt, dev, parent);
++	if (!rc)
++		rc = sysfs_read_u64(&cxt, "queue/discard_granularity", &dg);
++
++	sysfs_deinit(&cxt);
++	return rc == 0 && dg > 0;
++}
++
++
++static int uniq_fs_target_cmp(
++		struct libmnt_table *tb __attribute__((__unused__)),
++		struct libmnt_fs *a,
++		struct libmnt_fs *b)
++{
++	return !mnt_fs_streq_target(a, mnt_fs_get_target(b));
++}
++
++static int uniq_fs_source_cmp(
++		struct libmnt_table *tb __attribute__((__unused__)),
++		struct libmnt_fs *a,
++		struct libmnt_fs *b)
++{
++	int eq;
++
++	if (mnt_fs_is_pseudofs(a) || mnt_fs_is_netfs(a) ||
++	    mnt_fs_is_pseudofs(b) || mnt_fs_is_netfs(b))
++		return 1;
++
++	eq = mnt_fs_streq_srcpath(a, mnt_fs_get_srcpath(b));
++	if (eq) {
++		const char *aroot = mnt_fs_get_root(a),
++			   *broot = mnt_fs_get_root(b);
++		if (!aroot || !broot)
++			eq = 0;
++		else if (strcmp(aroot, broot) != 0)
++			eq = 0;
++	}
++
++	return !eq;
++}
++
++/*
++ * fstrim --all follows "mount -a" return codes:
++ *
++ * 0  = all success
++ * 32 = all failed
++ * 64 = some failed, some success
++ */
++static int fstrim_all(struct fstrim_range *rangetpl, int verbose)
++{
++	struct libmnt_fs *fs;
++	struct libmnt_iter *itr;
++	struct libmnt_table *tab;
++	struct sysfs_cxt wholedisk = UL_SYSFSCXT_EMPTY;
++	int cnt = 0, cnt_err = 0;
++
++	mnt_init_debug(0);
++
++	itr = mnt_new_iter(MNT_ITER_BACKWARD);
++	if (!itr)
++		err(MOUNT_EX_FAIL, _("failed to initialize libmount iterator"));
++
++	tab = mnt_new_table_from_file(_PATH_PROC_MOUNTINFO);
++	if (!tab)
++		err(MOUNT_EX_FAIL, _("failed to parse %s"), _PATH_PROC_MOUNTINFO);
++
++	/* de-duplicate by mountpoints */
++	mnt_table_uniq_fs(tab, 0, uniq_fs_target_cmp);
++
++	/* de-duplicate by source and root */
++	mnt_table_uniq_fs(tab, 0, uniq_fs_source_cmp);
++
++	while (mnt_table_next_fs(tab, itr, &fs) == 0) {
++		const char *src = mnt_fs_get_srcpath(fs),
++			   *tgt = mnt_fs_get_target(fs);
++		char *path;
++		int rc = 1;
++
++		if (!src || !tgt || *src != '/' ||
++		    mnt_fs_is_pseudofs(fs) ||
++		    mnt_fs_is_netfs(fs))
++			continue;
++
++		/* Is it really accessible mountpoint? Not all mountpoints are
++		 * accessible (maybe over mounted by another fylesystem) */
++		path = mnt_get_mountpoint(tgt);
++		if (path && strcmp(path, tgt) == 0)
++			rc = 0;
++		free(path);
++		if (rc)
++			continue;	/* overlaying mount */
++
++		if (!has_discard(src, &wholedisk))
++			continue;
++		cnt++;
++
++		/*
++		 * We're able to detect that the device supports discard, but
++		 * things also depend on filesystem or device mapping, for
++		 * example vfat or LUKS (by default) does not support FSTRIM.
++		 *
++		 * This is reason why we ignore EOPNOTSUPP and ENOTTY errors
++		 * from discard ioctl.
++		 */
++		if (fstrim_filesystem(tgt, rangetpl, verbose) < 0)
++		       cnt_err++;
++	}
++
++	sysfs_deinit(&wholedisk);
++	mnt_free_table(tab);
++	mnt_free_iter(itr);
++
++	if (cnt && cnt == cnt_err)
++		return MOUNT_EX_FAIL;		/* all failed */
++	if (cnt && cnt_err)
++		return MOUNT_EX_SOMEOK;		/* some ok */
++
++	return EXIT_SUCCESS;
++}
++
+ static void __attribute__((__noreturn__)) usage(FILE *out)
+ {
+ 	fputs(USAGE_HEADER, out);
+ 	fprintf(out,
+ 	      _(" %s [options] <mount point>\n"), program_invocation_short_name);
++
++	fputs(USAGE_SEPARATOR, out);
++	fputs(_("Discard unused blocks on a mounted filesystem.\n"), out);
++
+ 	fputs(USAGE_OPTIONS, out);
+-	fputs(_(" -o, --offset <num>  offset in bytes to discard from\n"
+-		" -l, --length <num>  length of bytes to discard from the offset\n"
+-		" -m, --minimum <num> minimum extent length to discard\n"
+-		" -v, --verbose       print number of discarded bytes\n"), out);
++	fputs(_(" -a, --all           trim all mounted filesystems that are supported\n"), out);
++	fputs(_(" -o, --offset <num>  the offset in bytes to start discarding from\n"), out);
++	fputs(_(" -l, --length <num>  the number of bytes to discard\n"), out);
++	fputs(_(" -m, --minimum <num> the minimum extent length to discard\n"), out);
++	fputs(_(" -v, --verbose       print number of discarded bytes\n"), out);
++
+ 	fputs(USAGE_SEPARATOR, out);
+ 	fputs(USAGE_HELP, out);
+ 	fputs(USAGE_VERSION, out);
+@@ -70,12 +275,12 @@ static void __attribute__((__noreturn__)
+ 
+ int main(int argc, char **argv)
+ {
+-	char *path;
+-	int c, fd, verbose = 0;
++	char *path = NULL;
++	int c, rc, verbose = 0, all = 0;
+ 	struct fstrim_range range;
+-	struct stat sb;
+ 
+ 	static const struct option longopts[] = {
++	    { "all",       0, 0, 'a' },
+ 	    { "help",      0, 0, 'h' },
+ 	    { "version",   0, 0, 'V' },
+ 	    { "offset",    1, 0, 'o' },
+@@ -93,8 +298,11 @@ int main(int argc, char **argv)
+ 	memset(&range, 0, sizeof(range));
+ 	range.len = ULLONG_MAX;
+ 
+-	while ((c = getopt_long(argc, argv, "hVo:l:m:v", longopts, NULL)) != -1) {
++	while ((c = getopt_long(argc, argv, "ahVo:l:m:v", longopts, NULL)) != -1) {
+ 		switch(c) {
++		case 'a':
++			all = 1;
++			break;
+ 		case 'h':
+ 			usage(stdout);
+ 			break;
+@@ -122,38 +330,26 @@ int main(int argc, char **argv)
+ 		}
+ 	}
+ 
+-	if (optind == argc)
+-		errx(EXIT_FAILURE, _("no mountpoint specified"));
+-
+-	path = argv[optind++];
++	if (!all) {
++		if (optind == argc)
++			errx(EXIT_FAILURE, _("no mountpoint specified"));
++		path = argv[optind++];
++	}
+ 
+ 	if (optind != argc) {
+ 		warnx(_("unexpected number of arguments"));
+ 		usage(stderr);
+ 	}
+ 
+-	if (stat(path, &sb) == -1)
+-		err(EXIT_FAILURE, _("stat failed %s"), path);
+-	if (!S_ISDIR(sb.st_mode))
+-		errx(EXIT_FAILURE, _("%s: not a directory"), path);
+-
+-	fd = open(path, O_RDONLY);
+-	if (fd < 0)
+-		err(EXIT_FAILURE, _("cannot open %s"), path);
+-
+-	if (ioctl(fd, FITRIM, &range))
+-		err(EXIT_FAILURE, _("%s: FITRIM ioctl failed"), path);
+-
+-	if (verbose) {
+-		char *str = size_to_human_string(SIZE_SUFFIX_3LETTER |
+-						 SIZE_SUFFIX_SPACE,
+-						 (uint64_t) range.len);
+-		/* TRANSLATORS: The standard value here is a very large number. */
+-		printf(_("%s: %s (%" PRIu64 " bytes) trimmed\n"),
+-						path, str,
+-						(uint64_t) range.len);
+-		free(str);
++	if (all)
++		rc = fstrim_all(&range, verbose);
++	else {
++		rc = fstrim_filesystem(path, &range, verbose);
++		if (rc == 1) {
++			warnx(_("%s: the discard operation is not supported"), path);
++			rc = EXIT_FAILURE;
++		}
+ 	}
+-	close(fd);
+-	return EXIT_SUCCESS;
++
++	return rc;
+ }
+diff -up util-linux-2.23.2/sys-utils/fstrim.service.in.kzak util-linux-2.23.2/sys-utils/fstrim.service
+--- util-linux-2.23.2/sys-utils/fstrim.service.in.kzak	2015-06-23 12:02:18.505564273 +0200
++++ util-linux-2.23.2/sys-utils/fstrim.service.in	2015-06-23 12:02:05.049662802 +0200
+@@ -0,0 +1,6 @@
++[Unit]
++Description=Discard unused blocks
++
++[Service]
++Type=oneshot
++ExecStart=@sbindir@/fstrim -a
+diff -up util-linux-2.23.2/sys-utils/fstrim.timer.kzak util-linux-2.23.2/sys-utils/fstrim.timer
+--- util-linux-2.23.2/sys-utils/fstrim.timer.kzak	2015-06-23 12:02:18.505564273 +0200
++++ util-linux-2.23.2/sys-utils/fstrim.timer	2015-06-23 12:02:05.049662802 +0200
+@@ -0,0 +1,11 @@
++[Unit]
++Description=Discard unused blocks once a week
++Documentation=man:fstrim
++
++[Timer]
++OnCalendar=weekly
++AccuracySec=1h
++Persistent=true
++
++[Install]
++WantedBy=multi-user.target
+diff -up util-linux-2.23.2/sys-utils/Makemodule.am.kzak util-linux-2.23.2/sys-utils/Makemodule.am
+--- util-linux-2.23.2/sys-utils/Makemodule.am.kzak	2015-06-23 11:59:05.803975307 +0200
++++ util-linux-2.23.2/sys-utils/Makemodule.am	2015-06-23 12:01:18.682002323 +0200
+@@ -68,7 +68,18 @@ fsfreeze_SOURCES = sys-utils/fsfreeze.c
+ sbin_PROGRAMS += fstrim
+ dist_man_MANS += sys-utils/fstrim.8
+ fstrim_SOURCES = sys-utils/fstrim.c
+-fstrim_LDADD = $(LDADD) libcommon.la
++fstrim_LDADD = $(LDADD) libcommon.la libmount.la
++fstrim_CFLAGS = $(AM_CFLAGS) -I$(ul_libmount_incdir)
++
++if HAVE_SYSTEMD
++systemdsystemunit_DATA += \
++		sys-utils/fstrim.service \
++		sys-utils/fstrim.timer
++endif
++
++PATHFILES += sys-utils/fstrim.service
++EXTRA_DIST += sys-utils/fstrim.timer
++
+ 
+ sbin_PROGRAMS += blkdiscard
+ dist_man_MANS += sys-utils/blkdiscard.8

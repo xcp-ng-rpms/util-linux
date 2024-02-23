@@ -1,0 +1,66 @@
+From 6999f3f3ca525bb6b132f4ed804e7f8fe62e5f79 Mon Sep 17 00:00:00 2001
+From: Ard Biesheuvel <ard.biesheuvel@linaro.org>
+Date: Wed, 12 Apr 2017 10:11:29 +0100
+Subject: [PATCH] lscpu: use sysfs for table access if available
+
+On ARM systems, accessing SMBIOS tables via /dev/mem using read()
+calls is not supported. The reason is that such tables are usually
+located in EFI_RUNTIME_SERVICE_DATA memory, which is not covered
+by the linear mapping on those systems, and so read() calls will
+fail.
+
+So instead, use the /sys/firmware/dmi/tables/DMI sysfs file, which
+contains the entire structure table array, and will be available
+on any recent Linux system, even on ones that only export the rev3
+SMBIOS entry point, which is currently ignored by lscpu.
+
+Note that the max 'num' value is inferred from the size. This is not
+a limitation of the sysfs interface, but a limitation of the rev3
+entry point, which no longer carries a number of array elements.
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1455664
+Upstream: http://github.com/karelzak/util-linux/commit/92a6392c41c11bcb49af9f129dfbd1fed651f044
+Signed-off-by: Ard Biesheuvel <ard.biesheuvel@linaro.org>
+Tested-by: Alexander Graf <agraf@suse.de>
+Reviewed-by: Alexander Graf <agraf@suse.de>
+---
+ sys-utils/lscpu-dmi.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/sys-utils/lscpu-dmi.c b/sys-utils/lscpu-dmi.c
+index 0e497d1..a8298ff 100644
+--- a/sys-utils/lscpu-dmi.c
++++ b/sys-utils/lscpu-dmi.c
+@@ -192,6 +192,18 @@ static int hypervisor_decode_smbios(uint8_t *buf, const char *devmem)
+ 		devmem);
+ }
+ 
++static int hypervisor_decode_sysfw(void)
++{
++	static char const sys_fw_dmi_tables[] = "/sys/firmware/dmi/tables/DMI";
++	struct stat st;
++
++	if (stat(sys_fw_dmi_tables, &st))
++		return -1;
++
++	return hypervisor_from_dmi_table(0, st.st_size, st.st_size / 4,
++					 sys_fw_dmi_tables);
++}
++
+ /*
+  * Probe for EFI interface
+  */
+@@ -242,6 +254,10 @@ int read_hypervisor_dmi(void)
+ 	    || '\0' != 0)
+ 		return rc;
+ 
++	rc = hypervisor_decode_sysfw();
++	if (rc >= 0)
++		return rc;
++
+ 	/* First try EFI (ia64, Intel-based Mac) */
+ 	switch (address_from_efi(&fp)) {
+ 		case EFI_NOT_FOUND:
+-- 
+2.9.4
+

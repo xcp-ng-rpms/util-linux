@@ -1,0 +1,27 @@
+From 346b97a27e817a001c71d45400f17429bd82b364 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Wed, 11 Mar 2015 11:38:07 +0100
+Subject: [PATCH 73/84] libmount: mark overlay as pseudo-FS
+
+Upstream: http://github.com/karelzak/util-linux/commit/209fd7a74879d37cef3d5d1679bc9cad76b96c7a
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=587393
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libmount/src/utils.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/libmount/src/utils.c b/libmount/src/utils.c
+index 2151ff9..c13fb96 100644
+--- a/libmount/src/utils.c
++++ b/libmount/src/utils.c
+@@ -269,6 +269,7 @@ int mnt_fstype_is_pseudofs(const char *type)
+ 		"mqueue",
+ 		"nfsd",
+ 		"none",
++		"overlay",
+ 		"pipefs",
+ 		"proc",
+ 		"pstore",
+-- 
+2.7.4
+

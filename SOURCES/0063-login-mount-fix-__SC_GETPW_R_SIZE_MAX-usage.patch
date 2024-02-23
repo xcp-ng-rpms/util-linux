@@ -1,0 +1,146 @@
+From 3d1333293ef48117060cd4e285e9c49a6d061e83 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 15 Dec 2015 12:25:56 +0100
+Subject: [PATCH 63/84] login, mount: fix __SC_GETPW_R_SIZE_MAX usage
+
+sysconf(_SC_GETPW_R_SIZE_MAX) returns initial suggested size for pwd
+buffer (see getpwnam_r man page or POSIX). This is not large enough in
+some cases.
+
+Yes, this sysconf option is misnamed (should be _SC_GETPW_R_SIZE_MIN).
+
+Upstream: http://github.com/karelzak/util-linux/commit/f7ac9e71b18fa7314151f2ab65ee0bdd2ea89c07
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1290689
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ include/c.h          |  7 +++++++
+ libmount/src/utils.c | 25 ++++++-------------------
+ login-utils/login.c  | 12 ++----------
+ 3 files changed, 15 insertions(+), 29 deletions(-)
+
+diff --git a/include/c.h b/include/c.h
+index a50e8a5..7b59ce8 100644
+--- a/include/c.h
++++ b/include/c.h
+@@ -300,4 +300,11 @@ static inline int usleep(useconds_t usec)
+ # define SEEK_HOLE	4
+ #endif
+ 
++/*
++ * Note that sysconf(_SC_GETPW_R_SIZE_MAX) returns *initial* suggested size for
++ * pwd buffer and in some cases it is not large enough. See POSIX and
++ * getpwnam_r man page for more details.
++ */
++#define UL_GETPW_BUFSIZ	(16 * 1024)
++
+ #endif /* UTIL_LINUX_C_H */
+diff --git a/libmount/src/utils.c b/libmount/src/utils.c
+index 9305bb8..7c6f5b1 100644
+--- a/libmount/src/utils.c
++++ b/libmount/src/utils.c
+@@ -538,16 +538,6 @@ int mnt_get_filesystems(char ***filesystems, const char *pattern)
+ 	return rc;
+ }
+ 
+-static size_t get_pw_record_size(void)
+-{
+-#ifdef _SC_GETPW_R_SIZE_MAX
+-	long sz = sysconf(_SC_GETPW_R_SIZE_MAX);
+-	if (sz > 0)
+-		return sz;
+-#endif
+-	return 16384;
+-}
+-
+ /*
+  * Returns allocated string with username or NULL.
+  */
+@@ -555,14 +545,13 @@ char *mnt_get_username(const uid_t uid)
+ {
+         struct passwd pwd;
+ 	struct passwd *res;
+-	size_t sz = get_pw_record_size();
+ 	char *buf, *username = NULL;
+ 
+-	buf = malloc(sz);
++	buf = malloc(UL_GETPW_BUFSIZ);
+ 	if (!buf)
+ 		return NULL;
+ 
+-	if (!getpwuid_r(uid, &pwd, buf, sz, &res) && res)
++	if (!getpwuid_r(uid, &pwd, buf, UL_GETPW_BUFSIZ, &res) && res)
+ 		username = strdup(pwd.pw_name);
+ 
+ 	free(buf);
+@@ -574,17 +563,16 @@ int mnt_get_uid(const char *username, uid_t *uid)
+ 	int rc = -1;
+         struct passwd pwd;
+ 	struct passwd *pw;
+-	size_t sz = get_pw_record_size();
+ 	char *buf;
+ 
+ 	if (!username || !uid)
+ 		return -EINVAL;
+ 
+-	buf = malloc(sz);
++	buf = malloc(UL_GETPW_BUFSIZ);
+ 	if (!buf)
+ 		return -ENOMEM;
+ 
+-	if (!getpwnam_r(username, &pwd, buf, sz, &pw) && pw) {
++	if (!getpwnam_r(username, &pwd, buf, UL_GETPW_BUFSIZ, &pw) && pw) {
+ 		*uid= pw->pw_uid;
+ 		rc = 0;
+ 	} else {
+@@ -602,17 +590,16 @@ int mnt_get_gid(const char *groupname, gid_t *gid)
+ 	int rc = -1;
+         struct group grp;
+ 	struct group *gr;
+-	size_t sz = get_pw_record_size();
+ 	char *buf;
+ 
+ 	if (!groupname || !gid)
+ 		return -EINVAL;
+ 
+-	buf = malloc(sz);
++	buf = malloc(UL_GETPW_BUFSIZ);
+ 	if (!buf)
+ 		return -ENOMEM;
+ 
+-	if (!getgrnam_r(groupname, &grp, buf, sz, &gr) && gr) {
++	if (!getgrnam_r(groupname, &grp, buf, UL_GETPW_BUFSIZ, &gr) && gr) {
+ 		*gid= gr->gr_gid;
+ 		rc = 0;
+ 	} else {
+diff --git a/login-utils/login.c b/login-utils/login.c
+index a59dd3a..e0e960f 100644
+--- a/login-utils/login.c
++++ b/login-utils/login.c
+@@ -671,22 +671,14 @@ static struct passwd *get_passwd_entry(const char *username,
+ 					 struct passwd *pwd)
+ {
+ 	struct passwd *res = NULL;
+-	size_t sz = 16384;
+ 	int x;
+ 
+ 	if (!pwdbuf || !username)
+ 		return NULL;
+ 
+-#ifdef _SC_GETPW_R_SIZE_MAX
+-	{
+-		long xsz = sysconf(_SC_GETPW_R_SIZE_MAX);
+-		if (xsz > 0)
+-			sz = (size_t) xsz;
+-	}
+-#endif
+-	*pwdbuf = xrealloc(*pwdbuf, sz);
++	*pwdbuf = xrealloc(*pwdbuf, UL_GETPW_BUFSIZ);
+ 
+-	x = getpwnam_r(username, pwd, *pwdbuf, sz, &res);
++	x = getpwnam_r(username, pwd, *pwdbuf, UL_GETPW_BUFSIZ, &res);
+ 	if (!res) {
+ 		errno = x;
+ 		return NULL;
+-- 
+2.7.4
+

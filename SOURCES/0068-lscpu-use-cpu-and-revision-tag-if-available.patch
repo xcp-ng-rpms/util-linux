@@ -1,0 +1,105 @@
+From cd0d8ef86151d72a246d565844d4c0470feb6b20 Mon Sep 17 00:00:00 2001
+From: Ruediger Meier <ruediger.meier@ga-group.nl>
+Date: Wed, 16 Mar 2016 13:18:18 +0100
+Subject: [PATCH 68/84] lscpu: use cpu and revision tag if available
+
+Avoid ifdef which does not work with --sysroot. Our existing test
+dumps produce even better output now for ppc and sparc.
+
+The logic moved to the printing section.
+
+Upstream: http://github.com/karelzak/util-linux/commit/641350fe822e7f1ac10873dad9a364bdeaba8083
+Upstream: http://github.com/karelzak/util-linux/commit/86c4817e0ea02656ddb62fe27757a9fd4f13b2d3
+Upstream: http://github.com/karelzak/util-linux/commit/c95e3889725389e9d7e24d29c2a71b015959575f
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1326615
+CC: Vasant Hegde <hegdevasant@linux.vnet.ibm.com>
+Signed-off-by: Ruediger Meier <ruediger.meier@ga-group.nl>
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/lscpu.c                             | 17 ++++++++---------
+ tests/expected/lscpu/lscpu-ppc64-POWER7       |  3 ++-
+ tests/expected/lscpu/lscpu-ppc64-POWER7-64cpu |  3 ++-
+ 3 files changed, 12 insertions(+), 11 deletions(-)
+
+diff --git a/sys-utils/lscpu.c b/sys-utils/lscpu.c
+index 68b15af..7a00636 100644
+--- a/sys-utils/lscpu.c
++++ b/sys-utils/lscpu.c
+@@ -141,6 +141,8 @@ struct lscpu_desc {
+ 	char	*family;
+ 	char	*model;
+ 	char	*modelname;
++	char	*revision;  /* alternative for model (ppc) */
++	char	*cpu;       /* alternative for modelname (ppc, sparc) */
+ 	char	*virtflag;	/* virtualization flag (vmx, svm) */
+ 	char	*hypervisor;	/* hypervisor software */
+ 	int	hyper;		/* hypervisor vendor ID */
+@@ -355,13 +357,8 @@ read_basicinfo(struct lscpu_desc *desc, struct lscpu_modifier *mod)
+ 		else if (lookup(buf, "vendor_id", &desc->vendor)) ;
+ 		else if (lookup(buf, "family", &desc->family)) ;
+ 		else if (lookup(buf, "cpu family", &desc->family)) ;
+-#if defined(__powerpc__) || defined(__powerpc64__)
+-		else if (lookup(buf, "revision", &desc->model)) ;
+-		else if (lookup(buf, "cpu", &desc->modelname)) ;
+-#else
+ 		else if (lookup(buf, "model", &desc->model)) ;
+ 		else if (lookup(buf, "model name", &desc->modelname)) ;
+-#endif
+ 		else if (lookup(buf, "stepping", &desc->stepping)) ;
+ 		else if (lookup(buf, "cpu MHz", &desc->mhz)) ;
+ 		else if (lookup(buf, "flags", &desc->flags)) ;		/* x86 */
+@@ -369,6 +366,8 @@ read_basicinfo(struct lscpu_desc *desc, struct lscpu_modifier *mod)
+ 		else if (lookup(buf, "type", &desc->flags)) ;		/* sparc64 */
+ 		else if (lookup(buf, "bogomips", &desc->bogomips)) ;
+ 		else if (lookup(buf, "bogomips per cpu", &desc->bogomips)) ; /* s390 */
++		else if (lookup(buf, "cpu", &desc->cpu)) ;
++		else if (lookup(buf, "revision", &desc->revision)) ;
+ 		else
+ 			continue;
+ 	}
+@@ -1264,10 +1263,10 @@ print_summary(struct lscpu_desc *desc, struct lscpu_modifier *mod)
+ 		print_s(_("Vendor ID:"), desc->vendor);
+ 	if (desc->family)
+ 		print_s(_("CPU family:"), desc->family);
+-	if (desc->model)
+-		print_s(_("Model:"), desc->model);
+-	if (desc->modelname)
+-		print_s(_("Model name:"), desc->modelname);
++	if (desc->model || desc->revision)
++		print_s(_("Model:"), desc->revision ? desc->revision : desc->model);
++	if (desc->modelname || desc->cpu)
++		print_s(_("Model name:"), desc->cpu ? desc->cpu : desc->modelname);
+ 	if (desc->stepping)
+ 		print_s(_("Stepping:"), desc->stepping);
+ 	if (desc->mhz)
+diff --git a/tests/expected/lscpu/lscpu-ppc64-POWER7 b/tests/expected/lscpu/lscpu-ppc64-POWER7
+index 0d6c5ba..9a3c0c9 100644
+--- a/tests/expected/lscpu/lscpu-ppc64-POWER7
++++ b/tests/expected/lscpu/lscpu-ppc64-POWER7
+@@ -4,7 +4,8 @@ Thread(s) per core:    4
+ Core(s) per socket:    1
+ Socket(s):             4
+ NUMA node(s):          1
+-Model:                 IBM,8233-E8B
++Model:                 2.1 (pvr 003f 0201)
++Model name:            POWER7 (architected), altivec supported
+ L1d cache:             32K
+ L1i cache:             32K
+ NUMA node0 CPU(s):     0-15
+diff --git a/tests/expected/lscpu/lscpu-ppc64-POWER7-64cpu b/tests/expected/lscpu/lscpu-ppc64-POWER7-64cpu
+index 40e2736..d4ae6c1 100644
+--- a/tests/expected/lscpu/lscpu-ppc64-POWER7-64cpu
++++ b/tests/expected/lscpu/lscpu-ppc64-POWER7-64cpu
+@@ -4,7 +4,8 @@ Thread(s) per core:    4
+ Core(s) per socket:    1
+ Socket(s):             16
+ NUMA node(s):          2
+-Model:                 IBM,8231-E2B
++Model:                 2.1 (pvr 003f 0201)
++Model name:            POWER7 (architected), altivec supported
+ L1d cache:             32K
+ L1i cache:             32K
+ NUMA node0 CPU(s):     0-63
+-- 
+2.7.4
+
