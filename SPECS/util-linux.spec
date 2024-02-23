@@ -2,7 +2,7 @@
 Summary: A collection of basic system utilities
 Name: util-linux
 Version: 2.23.2
-Release: 52%{?dist}.1
+Release: 52.1%{?dist}
 License: GPLv2 and GPLv2+ and LGPLv2+ and BSD with advertising and Public Domain
 Group: System Environment/Base
 URL: http://en.wikipedia.org/wiki/Util-linux
@@ -394,6 +394,11 @@ Patch150: 0150-libblkid-minix-Match-minix-superblock-types.patch
 Patch151: 0151-libblkid-minix-Sanity-check-superblock-s_state-for-v.patch
 Patch152: 0152-libblkid-minix-Use-same-checks-for-version-3.patch
 
+# XCP-ng patches
+Patch1000: 0001-losetup-Add-support-for-logical-block-size.patch
+Patch1001: 0002-losetup-rename-to-sector-size-and-LOG-SEC.patch
+Patch1002: 0003-losetup-properly-use-sector-size-when-create-a-new-d.patch
+Patch1003: 0004-losetup-Fix-typo-for-the-sector-size-docs.patch
 
 %description
 The util-linux package contains a large variety of low-level system
@@ -1127,6 +1132,9 @@ fi
 %{_libdir}/pkgconfig/uuid.pc
 
 %changelog
+* Mon Feb 12 2024 Yann Dirson <yann.dirson@vates.fr> 2.23.2-52.1
+- backport --sector-size support
+
 * Thu Jul 12 2018 Karel Zak <kzak@redhat.com> 2.23.2-52.el7_5.1
 - fix #1594681 - blkid does not output swap area
 
