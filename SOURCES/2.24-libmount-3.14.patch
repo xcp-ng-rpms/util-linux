@@ -1,0 +1,80 @@
+diff -up util-linux-2.23.2/libmount/src/tab.c.kzak util-linux-2.23.2/libmount/src/tab.c
+--- util-linux-2.23.2/libmount/src/tab.c.kzak	2013-07-30 10:39:26.218738358 +0200
++++ util-linux-2.23.2/libmount/src/tab.c	2014-09-25 10:53:43.525269554 +0200
+@@ -47,6 +47,8 @@
+ #include "strutils.h"
+ #include "loopdev.h"
+ 
++static int is_mountinfo(struct libmnt_table *tb);
++
+ /**
+  * mnt_new_table:
+  *
+@@ -233,7 +235,7 @@ int mnt_table_get_root_fs(struct libmnt_
+ 	assert(tb);
+ 	assert(root);
+ 
+-	if (!tb || !root)
++	if (!tb || !root || !is_mountinfo(tb))
+ 		return -EINVAL;
+ 
+ 	DBG(TAB, mnt_debug_h(tb, "lookup root fs"));
+@@ -241,8 +243,6 @@ int mnt_table_get_root_fs(struct libmnt_
+ 	mnt_reset_iter(&itr, MNT_ITER_FORWARD);
+ 	while(mnt_table_next_fs(tb, &itr, &fs) == 0) {
+ 		int id = mnt_fs_get_parent_id(fs);
+-		if (!id)
+-			break;		/* @tab is not mountinfo file? */
+ 
+ 		if (!*root || id < root_id) {
+ 			*root = fs;
+@@ -250,7 +250,7 @@ int mnt_table_get_root_fs(struct libmnt_
+ 		}
+ 	}
+ 
+-	return root_id ? 0 : -EINVAL;
++	return *root ? 0 : -EINVAL;
+ }
+ 
+ /**
+@@ -271,15 +271,13 @@ int mnt_table_next_child_fs(struct libmn
+ 	struct libmnt_fs *fs;
+ 	int parent_id, lastchld_id = 0, chld_id = 0;
+ 
+-	if (!tb || !itr || !parent)
++	if (!tb || !itr || !parent || !is_mountinfo(tb))
+ 		return -EINVAL;
+ 
+ 	DBG(TAB, mnt_debug_h(tb, "lookup next child of '%s'",
+ 				mnt_fs_get_target(parent)));
+ 
+ 	parent_id = mnt_fs_get_id(parent);
+-	if (!parent_id)
+-		return -EINVAL;
+ 
+ 	/* get ID of the previously returned child */
+ 	if (itr->head && itr->p != itr->head) {
+@@ -310,7 +308,7 @@ int mnt_table_next_child_fs(struct libmn
+ 		}
+ 	}
+ 
+-	if (!chld_id)
++	if (!*chld)
+ 		return 1;	/* end of iterator */
+ 
+ 	/* set the iterator to the @chld for the next call */
+diff -up util-linux-2.23.2/misc-utils/findmnt.c.kzak util-linux-2.23.2/misc-utils/findmnt.c
+--- util-linux-2.23.2/misc-utils/findmnt.c.kzak	2013-07-30 11:07:35.138395654 +0200
++++ util-linux-2.23.2/misc-utils/findmnt.c	2014-09-25 10:49:50.953050560 +0200
+@@ -826,8 +826,9 @@ static int tab_is_tree(struct libmnt_tab
+ 	if (!itr)
+ 		return 0;
+ 
+-	if (mnt_table_next_fs(tb, itr, &fs) == 0)
+-		rc = mnt_fs_get_id(fs) > 0 && mnt_fs_get_parent_id(fs) > 0;
++	rc = (mnt_table_next_fs(tb, itr, &fs) == 0 &&
++	      mnt_fs_is_kernel(fs) &&
++	      mnt_fs_get_root(fs));
+ 
+ 	mnt_free_iter(itr);
+ 	return rc;

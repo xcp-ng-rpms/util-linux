@@ -1,0 +1,61 @@
+From 8229770ff79a383d7e5b133f94609e861aae4283 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Fri, 17 Mar 2017 15:03:28 +0100
+Subject: [PATCH 099/116] sfdisk: remove useless CDROM detection for -s
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1402825
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ fdisks/sfdisk.c | 16 ++++++----------
+ 1 file changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/fdisks/sfdisk.c b/fdisks/sfdisk.c
+index 93bca27..afb15fc 100644
+--- a/fdisks/sfdisk.c
++++ b/fdisks/sfdisk.c
+@@ -2905,36 +2905,32 @@ do_pt_geom(char *dev, int silent) {
+ /* for compatibility with earlier fdisk: provide option -s */
+ static void
+ do_size(char *dev, int silent) {
+-    int fd;
++    int fd, rc;
+     unsigned long long size;
+ 
+     fd = my_open(dev, 0, silent);
+     if (fd < 0)
+ 	return;
+ 
+-    if (blkdev_get_sectors(fd, &size) == -1) {
++    rc = blkdev_get_sectors(fd, &size);
++    close(fd);
++
++    if (rc == -1) {
+ 	if (!silent) {
+ 	    perror(dev);
+ 	    errx(EXIT_FAILURE, _("Cannot get size of %s"), dev);
+ 	}
+-	goto done;
++	return;
+     }
+ 
+     size /= 2;			/* convert sectors to blocks */
+ 
+-    /* a CDROM drive without mounted CD yields MAXINT */
+-    if (silent && size == ((1 << 30) - 1))
+-	goto done;
+-
+     if (silent)
+ 	printf("%s: %9llu\n", dev, size);
+     else
+ 	printf("%llu\n", size);
+ 
+     total_size += size;
+-
+-done:
+-    close(fd);
+ }
+ 
+ /*
+-- 
+2.9.3
+

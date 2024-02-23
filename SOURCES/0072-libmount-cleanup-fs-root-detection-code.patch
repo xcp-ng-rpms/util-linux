@@ -1,0 +1,201 @@
+From bb3483bf21b9cbe462caaa74fbc03d2eb7845d74 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 10 Mar 2015 13:35:56 +0100
+Subject: [PATCH 72/84] libmount: cleanup fs root detection code
+
+Upstream: http://github.com/karelzak/util-linux/commit/cc06a01ec551ed2bcd397a5097165b4434179b34
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=587393
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libmount/src/tab.c                            | 32 ++++++++++++++++++++-----
+ libmount/src/utils.c                          | 34 ---------------------------
+ tests/expected/libmount/utils-fs-root         |  1 -
+ tests/expected/libmount/utils-fs-root-subdir  |  1 -
+ tests/expected/libmount/utils-fs-root-subdir2 |  1 -
+ tests/ts/libmount/utils                       | 12 ----------
+ 6 files changed, 26 insertions(+), 55 deletions(-)
+ delete mode 100644 tests/expected/libmount/utils-fs-root
+ delete mode 100644 tests/expected/libmount/utils-fs-root-subdir
+ delete mode 100644 tests/expected/libmount/utils-fs-root-subdir2
+
+diff --git a/libmount/src/tab.c b/libmount/src/tab.c
+index 1ba1eec..10ee7ce 100644
+--- a/libmount/src/tab.c
++++ b/libmount/src/tab.c
+@@ -46,6 +46,8 @@
+ #include "mountP.h"
+ #include "strutils.h"
+ #include "loopdev.h"
++#include "fileutils.h"
++#include "canonicalize.h"
+ 
+ static int is_mountinfo(struct libmnt_table *tb);
+ 
+@@ -900,6 +902,20 @@ struct libmnt_fs *mnt_table_find_devno(struct libmnt_table *tb,
+ 	return NULL;
+ }
+ 
++static char *remove_mountpoint_from_path(const char *path, const char *mnt)
++{
++        char *res;
++	const char *p;
++	size_t sz;
++
++	sz = strlen(mnt);
++	p = sz > 1 ? path + sz : path;
++
++	res = *p ? strdup(p) : strdup("/");
++	DBG(UTILS, mnt_debug("%s fs-root is %s", path, res));
++	return res;
++}
++
+ /*
+  * tb: /proc/self/mountinfo
+  * fs: filesystem
+@@ -919,7 +935,8 @@ struct libmnt_fs *mnt_table_get_fs_root(struct libmnt_table *tb,
+ 					unsigned long mountflags,
+ 					char **fsroot)
+ {
+-	char *root = NULL, *mnt = NULL;
++	char *root = NULL;
++	const char *mnt = NULL;
+ 	const char *fstype;
+ 	struct libmnt_fs *src_fs = NULL;
+ 
+@@ -937,10 +954,15 @@ struct libmnt_fs *mnt_table_get_fs_root(struct libmnt_table *tb,
+ 		DBG(TAB, mnt_debug("fs-root for bind"));
+ 
+ 		src = xsrc = mnt_resolve_spec(mnt_fs_get_source(fs), tb->cache);
+-		if (src)
+-			mnt = mnt_get_mountpoint(src);
++		if (src) {
++			struct libmnt_fs *fs = mnt_table_find_mountpoint(tb,
++							src, MNT_ITER_BACKWARD);
++			if (fs)
++				mnt = mnt_fs_get_target(fs);
++		}
++
+ 		if (mnt)
+-			root = mnt_get_fs_root(src, mnt);
++			root = remove_mountpoint_from_path(src, mnt);
+ 
+ 		if (xsrc && !tb->cache) {
+ 			free(xsrc);
+@@ -1007,11 +1029,9 @@ dflt:
+ 
+ 	DBG(TAB, mnt_debug("FS root result: %s", root));
+ 
+-	free(mnt);
+ 	return src_fs;
+ err:
+ 	free(root);
+-	free(mnt);
+ 	return NULL;
+ }
+ 
+diff --git a/libmount/src/utils.c b/libmount/src/utils.c
+index 5783d88..2151ff9 100644
+--- a/libmount/src/utils.c
++++ b/libmount/src/utils.c
+@@ -908,28 +908,6 @@ err:
+ 	return NULL;
+ }
+ 
+-char *mnt_get_fs_root(const char *path, const char *mnt)
+-{
+-	char *m = (char *) mnt, *res;
+-	const char *p;
+-	size_t sz;
+-
+-	if (!m)
+-		m = mnt_get_mountpoint(path);
+-	if (!m)
+-		return NULL;
+-
+-	sz = strlen(m);
+-	p = sz > 1 ? path + sz : path;
+-
+-	if (m != mnt)
+-		free(m);
+-
+-	res = *p ? strdup(p) : strdup("/");
+-	DBG(UTILS, mnt_debug("%s fs-root is %s", path, res));
+-	return res;
+-}
+-
+ /*
+  * Search for @name kernel command parametr.
+  *
+@@ -1085,17 +1063,6 @@ int test_mountpoint(struct libmnt_test *ts, int argc, char *argv[])
+ 	return 0;
+ }
+ 
+-int test_fsroot(struct libmnt_test *ts, int argc, char *argv[])
+-{
+-	char *path = canonicalize_path(argv[1]),
+-	     *mnt = path ? mnt_get_fs_root(path, NULL) : NULL;
+-
+-	printf("%s: %s\n", argv[1], mnt ? : "unknown");
+-	free(mnt);
+-	free(path);
+-	return 0;
+-}
+-
+ int test_filesystems(struct libmnt_test *ts, int argc, char *argv[])
+ {
+ 	char **filesystems = NULL;
+@@ -1170,7 +1137,6 @@ int main(int argc, char *argv[])
+ 	{ "--starts-with",   test_startswith,      "<string> <prefix>" },
+ 	{ "--ends-with",     test_endswith,        "<string> <prefix>" },
+ 	{ "--mountpoint",    test_mountpoint,      "<path>" },
+-	{ "--fs-root",       test_fsroot,          "<path>" },
+ 	{ "--cd-parent",     test_chdir,           "<path>" },
+ 	{ "--kernel-cmdline",test_kernel_cmdline,  "<option> | <option>=" },
+ 	{ "--mkdir",         test_mkdir,           "<path>" },
+diff --git a/tests/expected/libmount/utils-fs-root b/tests/expected/libmount/utils-fs-root
+deleted file mode 100644
+index 7746b28..0000000
+--- a/tests/expected/libmount/utils-fs-root
++++ /dev/null
+@@ -1 +0,0 @@
+-/proc: /
+diff --git a/tests/expected/libmount/utils-fs-root-subdir b/tests/expected/libmount/utils-fs-root-subdir
+deleted file mode 100644
+index 09cdb8d..0000000
+--- a/tests/expected/libmount/utils-fs-root-subdir
++++ /dev/null
+@@ -1 +0,0 @@
+-/proc/sys/kernel: /sys/kernel
+diff --git a/tests/expected/libmount/utils-fs-root-subdir2 b/tests/expected/libmount/utils-fs-root-subdir2
+deleted file mode 100644
+index 2e8b89a..0000000
+--- a/tests/expected/libmount/utils-fs-root-subdir2
++++ /dev/null
+@@ -1 +0,0 @@
+-/etc: /etc
+diff --git a/tests/ts/libmount/utils b/tests/ts/libmount/utils
+index 6facaad..89ecf10 100755
+--- a/tests/ts/libmount/utils
++++ b/tests/ts/libmount/utils
+@@ -64,18 +64,6 @@ ts_init_subtest "mountpoint-root"
+ ts_valgrind $TESTPROG --mountpoint / &> $TS_OUTPUT
+ ts_finalize_subtest
+ 
+-ts_init_subtest "fs-root"
+-ts_valgrind $TESTPROG --fs-root /proc &> $TS_OUTPUT
+-ts_finalize_subtest
+-
+-ts_init_subtest "fs-root-subdir"
+-ts_valgrind $TESTPROG --fs-root /proc/sys/kernel &> $TS_OUTPUT
+-ts_finalize_subtest
+-
+-ts_init_subtest "fs-root-subdir2"
+-ts_valgrind $TESTPROG --fs-root /etc &> $TS_OUTPUT
+-ts_finalize_subtest
+-
+ ts_init_subtest "kernel-cmdline"
+ export LIBMOUNT_KERNEL_CMDLINE="$TS_SELF/files/kernel_cmdline"
+ ts_valgrind $TESTPROG --kernel-cmdline selinux= &>> $TS_OUTPUT
+-- 
+2.7.4
+

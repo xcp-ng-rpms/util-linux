@@ -1,0 +1,11 @@
+diff -up util-linux-2.23.2/sys-utils/flock.c.kzak util-linux-2.23.2/sys-utils/flock.c
+--- util-linux-2.23.2/sys-utils/flock.c.kzak	2014-03-25 12:00:53.735361387 +0100
++++ util-linux-2.23.2/sys-utils/flock.c	2014-03-25 12:01:44.534886083 +0100
+@@ -250,6 +250,7 @@ int main(int argc, char *argv[])
+ 			/* otherwise try again */
+ 			continue;
+ 		case EIO:
++		case EBADF:		/* since Linux 3.4 (commit 55725513) */
+ 			/* Probably NFSv4 where flock() is emulated by fcntl().
+ 			 * Let's try to reopen in read-write mode.
+ 			 */

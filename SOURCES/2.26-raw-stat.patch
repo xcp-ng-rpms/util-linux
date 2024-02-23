@@ -1,0 +1,12 @@
+diff -up util-linux-2.23.2/disk-utils/raw.c.kzak util-linux-2.23.2/disk-utils/raw.c
+--- util-linux-2.23.2/disk-utils/raw.c.kzak	2013-06-13 09:46:10.382650297 +0200
++++ util-linux-2.23.2/disk-utils/raw.c	2015-01-13 14:51:24.877755962 +0100
+@@ -220,7 +220,7 @@ static int query(int minor_raw, const ch
+ 	if (raw_name) {
+ 		struct stat statbuf;
+ 
+-		if (!stat(raw_name, &statbuf))
++		if (stat(raw_name, &statbuf) != 0)
+ 			err(EXIT_RAW_ACCESS,
+ 			    _("Cannot locate raw device '%s'"), raw_name);
+ 		if (!S_ISCHR(statbuf.st_mode))

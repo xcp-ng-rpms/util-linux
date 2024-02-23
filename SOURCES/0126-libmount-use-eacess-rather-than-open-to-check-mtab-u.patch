@@ -1,0 +1,68 @@
+From 04cad06bed055a5dd373b2f5babc8000a76597a6 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 9 Oct 2017 12:44:48 +0200
+Subject: [PATCH] libmount: use eacess() rather than open() to check mtab/utab
+
+The open() syscall is probably the most strong way how to check write
+accessibility in all situations, but it's overkill and on some
+paranoid systems with enabled audit/selinux. It fills logs with
+"Permission denied" entries. Let's use eaccess() if available.
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1499760
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ configure.ac         |  1 +
+ libmount/src/utils.c | 19 +++++++++++++------
+ 2 files changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 78258d677..96c5838cf 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -315,6 +315,7 @@ AC_CHECK_FUNCS([ \
+ 	__fpending \
+ 	secure_getenv \
+ 	__secure_getenv \
++	eaccess \
+ 	err \
+ 	errx \
+ 	fsync \
+diff --git a/libmount/src/utils.c b/libmount/src/utils.c
+index 5c374b432..a275d0a0e 100644
+--- a/libmount/src/utils.c
++++ b/libmount/src/utils.c
+@@ -653,18 +653,25 @@ done:
+ 
+ static int try_write(const char *filename)
+ {
+-	int fd;
++	int rc = 0;
+ 
+ 	if (!filename)
+ 		return -EINVAL;
+ 
+-	fd = open(filename, O_RDWR|O_CREAT|O_CLOEXEC,
++#ifdef HAVE_EACCESS
++	if (eaccess(filename, R_OK|W_OK) != 0)
++		rc = -errno;
++#else
++	{
++		int fd = open(filename, O_RDWR|O_CREAT|O_CLOEXEC,
+ 			    S_IWUSR|S_IRUSR|S_IRGRP|S_IROTH);
+-	if (fd >= 0) {
+-		close(fd);
+-		return 0;
++		if (fd < 0)
++			rc = -errno;
++		else
++			close(fd);
+ 	}
+-	return -errno;
++#endif
++	return rc;
+ }
+ 
+ /**
+-- 
+2.13.6
+

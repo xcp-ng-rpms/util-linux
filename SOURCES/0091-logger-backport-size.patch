@@ -1,0 +1,165 @@
+From 1e0289af99737049de97b8cfe342b56d380560bf Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 16 Mar 2017 12:20:58 +0100
+Subject: [PATCH 091/116] logger: backport --size
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1323916
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ misc-utils/logger.1 |  6 ++++++
+ misc-utils/logger.c | 34 ++++++++++++++++++++++++----------
+ 2 files changed, 30 insertions(+), 10 deletions(-)
+
+diff --git a/misc-utils/logger.1 b/misc-utils/logger.1
+index 8c4faca..57ca0d5 100644
+--- a/misc-utils/logger.1
++++ b/misc-utils/logger.1
+@@ -98,6 +98,12 @@ logs the message as informational in the local3 facility.
+ The default is
+ .IR user.notice .
+ .TP
++\fB\-S\fR, \fB\-\-size\fR \fIsize\fR
++Sets the maximum permitted message size. The default is 1KiB, which is
++the limit traditionally used and specified in RFC 3164. When selecting a
++maximum message size, it is important to ensure that the receiver supports
++the max size as well, otherwise messages may become truncated.
++.TP
+ \fB\-s\fR, \fB\-\-stderr\fR
+ Output the message to standard error as well as to the system log.
+ .TP
+diff --git a/misc-utils/logger.c b/misc-utils/logger.c
+index a331869..dfda018 100644
+--- a/misc-utils/logger.c
++++ b/misc-utils/logger.c
+@@ -54,6 +54,8 @@
+ #include "closestream.h"
+ #include "nls.h"
+ #include "strutils.h"
++#include "xalloc.h"
++#include "all-io.h"
+ 
+ #define	SYSLOG_NAMES
+ #include <syslog.h>
+@@ -183,7 +185,7 @@ inet_socket(const char *servername, const char *port, const int socket_type)
+ 
+ static void
+ mysyslog(int fd, int logflags, int pri, char *tag, char *msg) {
+-       char buf[1000], pid[30], *cp, *tp;
++       char *buf, pid[30], *cp, *tp;
+        time_t now;
+ 
+        if (fd > -1) {
+@@ -201,11 +203,11 @@ mysyslog(int fd, int logflags, int pri, char *tag, char *msg) {
+                (void)time(&now);
+ 	       tp = ctime(&now)+4;
+ 
+-               snprintf(buf, sizeof(buf), "<%d>%.15s %.200s%s: %.400s",
++               xasprintf(&buf, "<%d>%.15s %.200s%s: %s",
+ 			pri, tp, cp, pid, msg);
+ 
+-               if (write(fd, buf, strlen(buf)+1) < 0)
+-                       return; /* error */
++	       write_all(fd, buf, strlen(buf)+1);
++	       free(buf);
+        }
+ }
+ 
+@@ -221,6 +223,7 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
+ 		" -i, --id              log the process ID too\n"
+ 		" -f, --file <file>     log the contents of this file\n"
+ 		" -h, --help            display this help text and exit\n"), out);
++	fputs(_(" -S, --size <num>      maximum size for a single message (default 1024)\n"), out);
+ 	fputs(_(" -n, --server <name>   write to this remote syslog server\n"
+ 		" -P, --port <port>     use this port for UDP or TCP connection\n"
+ 		" -p, --priority <prio> mark given message with this priority\n"
+@@ -241,11 +244,12 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
+ int
+ main(int argc, char **argv) {
+ 	int ch, logflags, pri;
+-	char *tag, buf[1024];
++	char *tag, *buf;
+ 	char *usock = NULL;
+ 	char *server = NULL;
+ 	char *port = NULL;
+ 	int LogSock = -1, socket_type = ALL_TYPES;
++	size_t max_message_size = 1024;
+ 
+ 	static const struct option longopts[] = {
+ 		{ "id",		no_argument,	    0, 'i' },
+@@ -253,6 +257,7 @@ main(int argc, char **argv) {
+ 		{ "file",	required_argument,  0, 'f' },
+ 		{ "priority",	required_argument,  0, 'p' },
+ 		{ "tag",	required_argument,  0, 't' },
++		{ "size",       required_argument,  0, 'S' },
+ 		{ "socket",	required_argument,  0, 'u' },
+ 		{ "udp",	no_argument,	    0, 'd' },
+ 		{ "tcp",	no_argument,	    0, 'T' },
+@@ -271,7 +276,7 @@ main(int argc, char **argv) {
+ 	tag = NULL;
+ 	pri = LOG_NOTICE;
+ 	logflags = 0;
+-	while ((ch = getopt_long(argc, argv, "f:ip:st:u:dTn:P:Vh",
++	while ((ch = getopt_long(argc, argv, "f:ip:st:u:dTn:P:S:Vh",
+ 					    longopts, NULL)) != -1) {
+ 		switch((char)ch) {
+ 		case 'f':		/* file to log */
+@@ -297,6 +302,10 @@ main(int argc, char **argv) {
+ 		case 'd':
+ 			socket_type = TYPE_UDP;
+ 			break;
++		case 'S':
++			max_message_size = strtosize_or_err(optarg,
++                                _("failed to parse message size"));
++			break;
+ 		case 'T':
+ 			socket_type = TYPE_TCP;
+ 			break;
+@@ -327,21 +336,23 @@ main(int argc, char **argv) {
+ 	else
+ 		openlog(tag ? tag : getlogin(), logflags, 0);
+ 
++	buf = xcalloc(1, max_message_size);
++
+ 	/* log input line if appropriate */
+ 	if (argc > 0) {
+ 		register char *p, *endp;
+ 		size_t len;
+ 
+-		for (p = buf, endp = buf + sizeof(buf) - 2; *argv;) {
++		for (p = buf, endp = buf + max_message_size - 2; *argv;) {
+ 			len = strlen(*argv);
+ 			if (p + len > endp && p > buf) {
+ 			    if (!usock && !server)
+ 				syslog(pri, "%s", buf);
+ 			    else
+ 				mysyslog(LogSock, logflags, pri, tag, buf);
+-				p = buf;
++			    p = buf;
+ 			}
+-			if (len > sizeof(buf) - 1) {
++			if (len > max_message_size - 1) {
+ 			    if (!usock && !server)
+ 				syslog(pri, "%s", *argv++);
+ 			    else
+@@ -360,7 +371,7 @@ main(int argc, char **argv) {
+ 			mysyslog(LogSock, logflags, pri, tag, buf);
+ 		}
+ 	} else {
+-		while (fgets(buf, sizeof(buf), stdin) != NULL) {
++		while (fgets(buf, max_message_size, stdin) != NULL) {
+ 		    /* glibc is buggy and adds an additional newline,
+ 		       so we have to remove it here until glibc is fixed */
+ 		    int len = strlen(buf);
+@@ -374,6 +385,9 @@ main(int argc, char **argv) {
+ 			mysyslog(LogSock, logflags, pri, tag, buf);
+ 		}
+ 	}
++
++	free(buf);
++
+ 	if (!usock && !server)
+ 		closelog();
+ 	else
+-- 
+2.9.3
+

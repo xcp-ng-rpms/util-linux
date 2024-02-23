@@ -1,0 +1,204 @@
+diff -up util-linux-2.23.2/libblkid/src/partitions/partitions.c.kzak util-linux-2.23.2/libblkid/src/partitions/partitions.c
+--- util-linux-2.23.2/libblkid/src/partitions/partitions.c.kzak	2015-08-11 14:00:27.930573965 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/partitions.c	2015-08-11 14:13:11.213087814 +0200
+@@ -533,7 +533,7 @@ static int idinfo_probe(blkid_probe pr,
+ {
+ 	const struct blkid_idmag *mag = NULL;
+ 	blkid_loff_t off;
+-	int rc = BLKID_PROBE_NONE;		/* = nothing detected */
++	int rc = BLKID_PROBE_NONE;		/* default is nothing */
+ 
+ 	if (pr->size <= 0 || (id->minsz && id->minsz > pr->size))
+ 		goto nothing;	/* the device is too small */
+@@ -564,8 +564,10 @@ static int idinfo_probe(blkid_probe pr,
+ 		DBG(LOWPROBE, blkid_debug("%s: <--- (rc = %d)", id->name, rc));
+ 	}
+ 
+-nothing:
+ 	return rc;
++
++nothing:
++	return BLKID_PROBE_NONE;
+ }
+ 
+ /*
+@@ -620,7 +622,7 @@ static int partitions_probe(blkid_probe
+ 						strlen(name) + 1);
+ 		DBG(LOWPROBE, blkid_debug("<-- leaving probing loop (type=%s) [PARTS idx=%d]",
+ 			name, chn->idx));
+-		rc = 0;
++		rc = BLKID_PROBE_OK;
+ 		break;
+ 	}
+ 
+@@ -637,10 +639,16 @@ details_only:
+ 	    (blkid_partitions_get_flags(pr) & BLKID_PARTS_ENTRY_DETAILS)) {
+ 
+ 		int xrc = blkid_partitions_probe_partition(pr);
++
++		/* partition entry probing is optional, and "not-found" from
++		 * this sub-probing must not to overwrite previous success. */
+ 		if (xrc < 0)
+-			rc = xrc;	/* optional, care about errors only */
++			rc = xrc;			/* always propagate errors */
++		else if (rc == BLKID_PROBE_NONE)
++			rc = xrc;
+ 	}
+ 
++	DBG(LOWPROBE, blkid_debug("partitions probe done [rc=%d]", rc));
+ 	return rc;
+ }
+ 
+@@ -709,7 +717,6 @@ int blkid_partitions_do_subprobe(blkid_p
+ 
+ static int blkid_partitions_probe_partition(blkid_probe pr)
+ {
+-	int rc = BLKID_PROBE_NONE;
+ 	blkid_probe disk_pr = NULL;
+ 	blkid_partlist ls;
+ 	blkid_partition par;
+@@ -732,7 +739,9 @@ static int blkid_partitions_probe_partit
+ 		goto nothing;
+ 
+ 	par = blkid_partlist_devno_to_partition(ls, devno);
+-	if (par) {
++	if (!par)
++		goto nothing;
++	else {
+ 		const char *v;
+ 		blkid_parttable tab = blkid_partition_get_table(par);
+ 		dev_t disk = blkid_probe_get_devno(disk_pr);
+@@ -778,9 +787,13 @@ static int blkid_partitions_probe_partit
+ 		blkid_probe_sprintf_value(pr, "PART_ENTRY_DISK", "%u:%u",
+ 				major(disk), minor(disk));
+ 	}
+-	rc = BLKID_PROBE_OK;
++
++	DBG(LOWPROBE, blkid_debug("parts: end probing for partition entry [success]"));
++	return BLKID_PROBE_OK;
++
+ nothing:
+-	return rc;
++	DBG(LOWPROBE, blkid_debug("parts: end probing for partition entry [nothing]"));
++	return BLKID_PROBE_NONE;
+ }
+ 
+ /*
+diff -up util-linux-2.23.2/libblkid/src/superblocks/superblocks.c.kzak util-linux-2.23.2/libblkid/src/superblocks/superblocks.c
+--- util-linux-2.23.2/libblkid/src/superblocks/superblocks.c.kzak	2015-07-03 10:35:05.456153560 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/superblocks.c	2015-08-11 14:08:42.572674469 +0200
+@@ -335,19 +335,24 @@ static int superblocks_probe(blkid_probe
+ 
+ 	if (!pr || chn->idx < -1)
+ 		return -EINVAL;
+-	if (pr->flags & BLKID_FL_NOSCAN_DEV)
+-		goto nothing;
+ 
+ 	blkid_probe_chain_reset_vals(pr, chn);
+ 
+ 	DBG(LOWPROBE, blkid_debug("--> starting probing loop [SUBLKS idx=%d]",
+ 		chn->idx));
+ 
++	if (pr->flags & BLKID_FL_NOSCAN_DEV)
++		return BLKID_PROBE_NONE;
++
+ 	if (pr->size <= 0 || (pr->size <= 1024 && !S_ISCHR(pr->mode)))
+ 		/* Ignore very very small block devices or regular files (e.g.
+ 		 * extended partitions). Note that size of the UBI char devices
+ 		 * is 1 byte */
+-		goto nothing;
++		return BLKID_PROBE_NONE;
++
++
++	DBG(LOWPROBE, blkid_debug("--> starting probing loop [SUBLKS idx=%d]",
++		chn->idx));
+ 
+ 	i = chn->idx < 0 ? 0 : chn->idx + 1U;
+ 
+@@ -417,7 +422,7 @@ static int superblocks_probe(blkid_probe
+ 					(unsigned char *) mag->magic);
+ 		if (rc) {
+ 			blkid_probe_chain_reset_vals(pr, chn);
+-			DBG(LOWPROBE, blkid_debug("failed to set result -- ingnore"));
++			DBG(LOWPROBE, blkid_debug("failed to set result -- ignore"));
+ 			continue;
+ 		}
+ 
+@@ -426,7 +431,6 @@ static int superblocks_probe(blkid_probe
+ 		return BLKID_PROBE_OK;
+ 	}
+ 
+-nothing:
+ 	DBG(LOWPROBE, blkid_debug("<-- leaving probing loop (failed=%d) [SUBLKS idx=%d]",
+ 			rc, chn->idx));
+ 	return rc;
+@@ -454,13 +458,12 @@ static int superblocks_safeprobe(blkid_p
+ 	int rc;
+ 
+ 	if (pr->flags & BLKID_FL_NOSCAN_DEV)
+-		return 1;				/* nothing */
++		return BLKID_PROBE_NONE;
+ 
+ 	while ((rc = superblocks_probe(pr, chn)) == 0) {
+ 
+ 		if (blkid_probe_is_tiny(pr) && !count)
+-			/* floppy or so -- returns the first result. */
+-			return 0;
++			return BLKID_PROBE_OK;	/* floppy or so -- returns the first result. */
+ 
+ 		count++;
+ 
+@@ -489,7 +492,7 @@ static int superblocks_safeprobe(blkid_p
+ 		return -2;		/* error, ambivalent result (more FS) */
+ 	}
+ 	if (!count)
+-		return 1;		/* nothing detected */
++		return BLKID_PROBE_NONE;
+ 
+ 	if (idx != -1) {
+ 		/* restore the first result */
+@@ -506,7 +509,7 @@ static int superblocks_safeprobe(blkid_p
+ 	if (chn->idx >= 0 && idinfos[chn->idx]->usage & BLKID_USAGE_RAID)
+ 		pr->prob_flags |= BLKID_PROBE_FL_IGNORE_PT;
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ }
+ 
+ int blkid_probe_set_version(blkid_probe pr, const char *version)
+diff -up util-linux-2.23.2/libblkid/src/topology/topology.c.kzak util-linux-2.23.2/libblkid/src/topology/topology.c
+--- util-linux-2.23.2/libblkid/src/topology/topology.c.kzak	2013-06-13 09:46:10.429650699 +0200
++++ util-linux-2.23.2/libblkid/src/topology/topology.c	2015-08-11 14:09:35.623361499 +0200
+@@ -150,7 +150,7 @@ static int topology_probe(blkid_probe pr
+ 		return -1;
+ 
+ 	if (!S_ISBLK(pr->mode))
+-		return -1;	/* nothing, works with block devices only */
++		return -EINVAL;	/* nothing, works with block devices only */
+ 
+ 	if (chn->binary) {
+ 		DBG(LOWPROBE, blkid_debug("initialize topology binary data"));
+@@ -163,7 +163,7 @@ static int topology_probe(blkid_probe pr
+ 			chn->data = calloc(1,
+ 					sizeof(struct blkid_struct_topology));
+ 			if (!chn->data)
+-				return -1;
++				return -ENOMEM;
+ 		}
+ 	}
+ 
+@@ -193,12 +193,12 @@ static int topology_probe(blkid_probe pr
+ 
+ 		DBG(LOWPROBE, blkid_debug("<-- leaving probing loop (type=%s) [TOPOLOGY idx=%d]",
+ 			id->name, chn->idx));
+-		return 0;
++		return BLKID_PROBE_OK;
+ 	}
+ 
+ 	DBG(LOWPROBE, blkid_debug("<-- leaving probing loop (failed) [TOPOLOGY idx=%d]",
+ 		chn->idx));
+-	return 1;
++	return BLKID_PROBE_NONE;
+ }
+ 
+ static void topology_free(blkid_probe pr __attribute__((__unused__)),

@@ -1,0 +1,63 @@
+diff -up util-linux-2.23.2/include/loopdev.h.kzak util-linux-2.23.2/include/loopdev.h
+--- util-linux-2.23.2/include/loopdev.h.kzak	2013-06-13 09:46:10.397650425 +0200
++++ util-linux-2.23.2/include/loopdev.h	2014-01-14 11:11:48.427643690 +0100
+@@ -149,6 +149,7 @@ extern void loopcxt_enable_debug(struct
+ extern int loopcxt_set_device(struct loopdev_cxt *lc, const char *device)
+ 				__attribute__ ((warn_unused_result));
+ extern int loopcxt_has_device(struct loopdev_cxt *lc);
++extern int loopcxt_add_device(struct loopdev_cxt *lc);
+ extern char *loopcxt_strdup_device(struct loopdev_cxt *lc);
+ extern const char *loopcxt_get_device(struct loopdev_cxt *lc);
+ extern struct sysfs_cxt *loopcxt_get_sysfs(struct loopdev_cxt *lc);
+diff -up util-linux-2.23.2/lib/loopdev.c.kzak util-linux-2.23.2/lib/loopdev.c
+--- util-linux-2.23.2/lib/loopdev.c.kzak	2013-07-30 11:19:20.143600300 +0200
++++ util-linux-2.23.2/lib/loopdev.c	2014-01-14 11:11:48.428643700 +0100
+@@ -1298,6 +1298,36 @@ int loopcxt_delete_device(struct loopdev
+ 	return 0;
+ }
+ 
++int loopcxt_add_device(struct loopdev_cxt *lc)
++{
++	int rc = -EINVAL;
++	int ctl, nr = -1;
++	const char *p, *dev = loopcxt_get_device(lc);
++
++	if (!dev)
++		goto done;
++
++	if (!(lc->flags & LOOPDEV_FL_CONTROL)) {
++		rc = -ENOSYS;
++		goto done;
++	}
++
++	p = strrchr(dev, '/');
++	if (!p || (sscanf(p, "/loop%d", &nr) != 1 && sscanf(p, "/%d", &nr) != 1)
++	       || nr < 0)
++		goto done;
++
++	ctl = open(_PATH_DEV_LOOPCTL, O_RDWR|O_CLOEXEC);
++	if (ctl >= 0) {
++		DBG(lc, loopdev_debug("add_device %d", nr));
++		rc = ioctl(ctl, LOOP_CTL_ADD, nr);
++		close(ctl);
++	}
++done:
++	DBG(lc, loopdev_debug("add_device done [rc=%d]", rc));
++	return rc;
++}
++
+ /*
+  * Note that LOOP_CTL_GET_FREE ioctl is supported since kernel 3.1. In older
+  * kernels we have to check all loop devices to found unused one.
+diff -up util-linux-2.23.2/sys-utils/losetup.c.kzak util-linux-2.23.2/sys-utils/losetup.c
+--- util-linux-2.23.2/sys-utils/losetup.c.kzak	2013-07-30 11:20:16.987117853 +0200
++++ util-linux-2.23.2/sys-utils/losetup.c	2014-01-14 11:11:48.428643700 +0100
+@@ -600,6 +600,8 @@ int main(int argc, char **argv)
+ 	{
+ 		int hasdev = loopcxt_has_device(&lc);
+ 
++		if (hasdev && !is_loopdev(loopcxt_get_device(&lc)))
++			loopcxt_add_device(&lc);
+ 		do {
+ 			const char *errpre;
+ 

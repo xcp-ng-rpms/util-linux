@@ -1,0 +1,28 @@
+From eda050c1fc9f65fc138c9fabf35ef7865c5b10a7 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Fri, 30 May 2014 11:27:41 +0200
+Subject: [PATCH 107/116] libblkid: (zfs) let's keep compiler happy
+
+Upstream: http://github.com/karelzak/util-linux/commit/59cbbd71cdfb6a6fc6901e287b300aa8d45d6606
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1392661
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libblkid/src/superblocks/zfs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libblkid/src/superblocks/zfs.c b/libblkid/src/superblocks/zfs.c
+index 56ee472..86da59d 100644
+--- a/libblkid/src/superblocks/zfs.c
++++ b/libblkid/src/superblocks/zfs.c
+@@ -171,7 +171,7 @@ static int probe_zfs(blkid_probe pr,
+ 	uint64_t swab_magic = swab64(UBERBLOCK_MAGIC);
+ 	struct zfs_uberblock *ub;
+ 	int swab_endian;
+-	loff_t offset, ub_offset;
++	loff_t offset, ub_offset = 0;
+ 	int tried;
+ 	int found;
+ 
+-- 
+2.9.3
+

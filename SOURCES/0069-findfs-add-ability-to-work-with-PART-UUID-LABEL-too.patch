@@ -1,0 +1,137 @@
+From 2555bd3bad9ea8e7ae40a727f59bb546d2aa2717 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Fri, 28 Mar 2014 10:36:05 +0100
+Subject: [PATCH 69/84] findfs: add ability to work with PART{UUID,LABEL}= too
+
+Upstream: http://github.com/karelzak/util-linux/commit/c48508c2faa356c48c26d7d0070a6f20ae4ba9a0
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1335671
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ misc-utils/findfs.8 | 51 +++++++++++++++++++++++++++++++++++++++------------
+ misc-utils/findfs.c | 17 +++++------------
+ 2 files changed, 44 insertions(+), 24 deletions(-)
+
+diff --git a/misc-utils/findfs.8 b/misc-utils/findfs.8
+index 8a6bca1..b92cd45 100644
+--- a/misc-utils/findfs.8
++++ b/misc-utils/findfs.8
+@@ -7,19 +7,45 @@
+ findfs \- find a filesystem by label or UUID
+ .SH SYNOPSIS
+ .B findfs
+-.BI LABEL= label
+-.sp
+-.B findfs
+-.BI UUID= uuid
++.BI NAME= value
+ .SH DESCRIPTION
+ .B findfs
+-will search the disks in the system looking for a filesystem which has
+-a label matching
+-.I label
+-or a UUID equal to
+-.IR uuid .
+-If the filesystem is found, the device name for the filesystem will
+-be printed on stdout.
++will search the block devices in the system looking for a filesystem or
++partition with specified tag. The currently supported tags are:
++.TP
++.B LABEL=<label>
++Specifies filesystem label.
++.TP
++.B UUID=<uuid>
++Specifies filesystem UUID.
++.TP
++.B PARTUUID=<uuid>
++Specifies partition UUID. This partition identifier is supported for example for
++GUID  Partition  Table (GPT) partition tables.
++.TP
++.B PARTLABEL=<label>
++Specifies partition label (name). The partition labels are supported for example for
++GUID Partition Table (GPT) or MAC partition tables.
++.PP
++If the filesystem or partition is found, the device name will be printed on
++stdout.
++
++The complete overview about filesystems and partitions you can get for example
++by
++.RS
++
++.br
++.BI "lsblk \-\-fs"
++.br
++
++.BI "partx --show <disk>"
++.br
++
++.BI blkid
++.br
++
++.RE
++
+ .PP
+ .SH AUTHOR
+ .B findfs
+@@ -30,7 +56,8 @@ the util-linux package by Karel Zak (kzak@redhat.com).
+ enables debug output.
+ .SH SEE ALSO
+ .BR blkid (8),
+-.BR fsck (8)
++.BR lsblk (8),
++.BR partx (8)
+ .SH AVAILABILITY
+ The findfs command is part of the util-linux package and is available from
+ ftp://ftp.kernel.org/pub/linux/utils/util-linux/.
+diff --git a/misc-utils/findfs.c b/misc-utils/findfs.c
+index bc4a843..29ca1cb 100644
+--- a/misc-utils/findfs.c
++++ b/misc-utils/findfs.c
+@@ -19,8 +19,7 @@ static void __attribute__((__noreturn__)) usage(int rc)
+ {
+ 	FILE *out = rc ? stderr : stdout;
+ 	fputs(USAGE_HEADER, out);
+-	fprintf(out, _(" %1$s [options] LABEL=<label>\n"
+-		       " %1$s [options] UUID=<uuid>\n"),
++	fprintf(out, _(" %s [options] {LABEL,UUID,PARTUUID,PARTLABEL}=<value>\n"),
+ 		program_invocation_short_name);
+ 	fputs(USAGE_OPTIONS, out);
+ 	fputs(USAGE_HELP, out);
+@@ -31,7 +30,7 @@ static void __attribute__((__noreturn__)) usage(int rc)
+ 
+ int main(int argc, char **argv)
+ {
+-	char	*dev, *tk, *vl;
++	char	*dev;
+ 
+ 	setlocale(LC_ALL, "");
+ 	bindtextdomain(PACKAGE, LOCALEDIR);
+@@ -43,23 +42,17 @@ int main(int argc, char **argv)
+ 		 * with version from e2fsprogs */
+ 		usage(2);
+ 
+-	if (!strncmp(argv[1], "LABEL=", 6)) {
+-		tk = "LABEL";
+-		vl = argv[1] + 6;
+-	} else if (!strncmp(argv[1], "UUID=", 5)) {
+-		tk = "UUID";
+-		vl = argv[1] + 5;
+-	} else if (strcmp(argv[1], "-V") == 0 ||
++	if (strcmp(argv[1], "-V") == 0 ||
+ 		   strcmp(argv[1], "--version") == 0) {
+ 		printf(UTIL_LINUX_VERSION);
+ 		return EXIT_SUCCESS;
+ 	} else if (strcmp(argv[1], "-h") == 0 ||
+ 		   strcmp(argv[1], "--help") == 0) {
+ 		usage(EXIT_SUCCESS);
+-	} else
++	} else if (argv[1][0] == '-')
+ 		usage(2);
+ 
+-	dev = blkid_evaluate_tag(tk, vl, NULL);
++	dev = blkid_evaluate_tag(argv[1], NULL, NULL);
+ 	if (!dev)
+ 		errx(EXIT_FAILURE, _("unable to resolve '%s'"),	argv[1]);
+ 
+-- 
+2.7.4
+

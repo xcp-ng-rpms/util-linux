@@ -1,0 +1,86 @@
+From a8427f41c91ac12f0b208fe7eaf4e535b8a56464 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 4 Dec 2017 12:31:29 +0100
+Subject: [PATCH 145/146] login: add LOGIN_PLAIN_PROMPT to login.defs
+
+We have command line option -H to disable hostname in login prompt.
+Unfortunately, in same cases (e.g. telnetd) it's impossible to specify
+login(1) command line options due to hardcoded execl()...
+
+This patch introduces LOGIN_PLAIN_PROMPT boolean for /etc/login.defs
+to suppress hostname in the prompt.
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1520906
+Upstream: http://github.com/karelzak/util-linux/commit/e6b32e7d1adf2a0c09743d71dfdbe2742c5884ac
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ login-utils/login.1 | 12 ++++++++++++
+ login-utils/login.c | 12 +++++++++---
+ 2 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/login-utils/login.1 b/login-utils/login.1
+index 216645ebe..ec636fd74 100644
+--- a/login-utils/login.1
++++ b/login-utils/login.1
+@@ -130,6 +130,9 @@ Used by other servers (i.e.,
+ to tell
+ .B login
+ that printing the hostname should be suppressed in the login: prompt.
++See also LOGIN_PLAIN_PROMPT below if your server does not allow to configure
++.B login
++command line.
+ .TP
+ .B \-V
+ Print version and exit.
+@@ -157,6 +160,15 @@ by
+ PAM module.
+ .RE
+ .PP
++.B LOGIN_PLAIN_PROMPT
++(boolean)
++.RS 4
++Tell login that printing the hostname should be suppressed in the login:
++prompt.  This is alternative to the \fB\-H\fR command line option.  The default
++value is
++.IR no .
++.RE
++.PP
+ .B LOGIN_TIMEOUT
+ (number)
+ .RS 4
+diff --git a/login-utils/login.c b/login-utils/login.c
+index 5c36953ef..eee3f7bd1 100644
+--- a/login-utils/login.c
++++ b/login-utils/login.c
+@@ -709,7 +709,8 @@ static void loginpam_err(pam_handle_t *pamh, int retcode)
+ }
+ 
+ /*
+- * Composes "<host> login: " string; or returns "login: " is -H is given
++ * Composes "<host> login: " string; or returns "login: " if -H is given or
++ * LOGIN_PLAIN_PROMPT=yes configured.
+  */
+ static const char *loginpam_get_prompt(struct login_context *cxt)
+ {
+@@ -717,11 +718,16 @@ static const char *loginpam_get_prompt(struct login_context *cxt)
+ 	char *prompt, *dflt_prompt = _("login: ");
+ 	size_t sz;
+ 
+-	if (cxt->nohost || !(host = get_thishost(cxt, NULL)))
++	if (cxt->nohost)
++		return dflt_prompt;	/* -H on command line */
++
++	if (getlogindefs_bool("LOGIN_PLAIN_PROMPT", 0) == 1)
+ 		return dflt_prompt;
+ 
+-	sz = strlen(host) + 1 + strlen(dflt_prompt) + 1;
++	if (!(host = get_thishost(cxt, NULL)))
++		return dflt_prompt;
+ 
++	sz = strlen(host) + 1 + strlen(dflt_prompt) + 1;
+ 	prompt = xmalloc(sz);
+ 	snprintf(prompt, sz, "%s %s", host, dflt_prompt);
+ 
+-- 
+2.13.6
+

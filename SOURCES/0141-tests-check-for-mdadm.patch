@@ -1,0 +1,53 @@
+From 609177ec200592dce34bf0ee082c0d2ac8d01b8b Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 17 Oct 2017 12:35:31 +0200
+Subject: [PATCH 141/141] tests: check for mdadm
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1454652
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ tests/ts/blkid/md-raid1-part   | 1 +
+ tests/ts/eject/umount          | 2 +-
+ tests/ts/fdisk/align-512-4K-md | 1 +
+ 3 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/tests/ts/blkid/md-raid1-part b/tests/ts/blkid/md-raid1-part
+index 20612ec21..de21bca9a 100755
+--- a/tests/ts/blkid/md-raid1-part
++++ b/tests/ts/blkid/md-raid1-part
+@@ -22,6 +22,7 @@ TS_DESC="MD raid1 (last partition)"
+ . $TS_TOPDIR/functions.sh
+ ts_init "$*"
+ ts_skip_nonroot
++ts_check_prog "mdadm"
+ 
+ # set global variable TS_DEVICE
+ ts_scsi_debug_init dev_size_mb=51 sector_size=512
+diff --git a/tests/ts/eject/umount b/tests/ts/eject/umount
+index 994ddb483..e5cfe2b14 100755
+--- a/tests/ts/eject/umount
++++ b/tests/ts/eject/umount
+@@ -43,7 +43,7 @@ EOF
+ 
+ function deinit_device {
+ 	udevadm settle
+-	rmmod scsi_debug
++	ts_scsi_debug_rmmod
+ }
+ 
+ 
+diff --git a/tests/ts/fdisk/align-512-4K-md b/tests/ts/fdisk/align-512-4K-md
+index ad662e0e8..c45a0d43b 100755
+--- a/tests/ts/fdisk/align-512-4K-md
++++ b/tests/ts/fdisk/align-512-4K-md
+@@ -26,6 +26,7 @@ TS_DESC="align 512/4K +MD"
+ . $TS_TOPDIR/functions.sh
+ ts_init "$*"
+ ts_skip_nonroot
++ts_check_prog "mdadm"
+ 
+ # set global variable TS_DEVICE
+ ts_scsi_debug_init dev_size_mb=50 sector_size=512 physblk_exp=3
+-- 
+2.13.6
+

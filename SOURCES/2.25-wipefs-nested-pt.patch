@@ -1,0 +1,53 @@
+diff -up util-linux-2.23.2/misc-utils/wipefs.8.kzak util-linux-2.23.2/misc-utils/wipefs.8
+--- util-linux-2.23.2/misc-utils/wipefs.8.kzak	2014-09-24 10:41:31.061930168 +0200
++++ util-linux-2.23.2/misc-utils/wipefs.8	2014-09-24 10:46:30.142783728 +0200
+@@ -37,6 +37,11 @@ table will still be visible by another m
+ When used with option \fB-a\fR, all magic strings that are visible for libblkid are
+ erased.
+ 
++Note that by default
++.B wipefs
++does not erase nested partition tables on non-whole disk devices. The option 
++\-\-force is required.
++
+ .SH OPTIONS
+ .TP
+ .BR \-a , " \-\-all"
+diff -up util-linux-2.23.2/misc-utils/wipefs.c.kzak util-linux-2.23.2/misc-utils/wipefs.c
+--- util-linux-2.23.2/misc-utils/wipefs.c.kzak	2014-09-24 10:41:31.061930168 +0200
++++ util-linux-2.23.2/misc-utils/wipefs.c	2014-09-24 10:50:07.728859738 +0200
+@@ -332,7 +332,7 @@ static void rereadpt(int fd, const char
+ static struct wipe_desc *
+ do_wipe(struct wipe_desc *wp, const char *devname, int noact, int all, int quiet, int force)
+ {
+-	int flags, reread = 0;
++	int flags, reread = 0, need_force = 0;
+ 	blkid_probe pr;
+ 	struct wipe_desc *w, *wp0;
+ 	int zap = all ? 1 : wp->zap;
+@@ -365,6 +365,15 @@ do_wipe(struct wipe_desc *wp, const char
+ 		if (!wp->on_disk)
+ 			continue;
+ 
++		if (!force
++		    && wp->is_parttable
++		    && !blkid_probe_is_wholedisk(pr)) {
++			warnx(_("%s: ignore nested \"%s\" partition "
++				"table on non-whole disk device."), devname, wp->type);
++			need_force = 1;
++			continue;
++		}
++
+ 		if (zap) {
+ 			do_wipe_real(pr, devname, wp, noact, quiet);
+ 			if (wp->is_parttable)
+@@ -377,6 +386,9 @@ do_wipe(struct wipe_desc *wp, const char
+ 			warnx(_("%s: offset 0x%jx not found"), devname, w->offset);
+ 	}
+ 
++	if (need_force)
++		warnx(_("Use the --force option to force erase."));
++
+ 	fsync(blkid_probe_get_fd(pr));
+ 
+ 	if (reread)

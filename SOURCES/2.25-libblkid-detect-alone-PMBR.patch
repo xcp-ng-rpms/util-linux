@@ -1,0 +1,100 @@
+diff -up util-linux-2.23.2/libblkid/src/partitions/gpt.c.kzak util-linux-2.23.2/libblkid/src/partitions/gpt.c
+--- util-linux-2.23.2/libblkid/src/partitions/gpt.c.kzak	2013-07-30 10:39:26.206738239 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/gpt.c	2014-01-23 11:06:17.364011293 +0100
+@@ -156,13 +156,15 @@ static int last_lba(blkid_probe pr, uint
+  * Note that the PMBR detection is optional (enabled by default) and could be
+  * disabled by BLKID_PARTS_FOPCE_GPT flag (see also blkid_paertitions_set_flags()).
+  */
+-static int is_pmbr_valid(blkid_probe pr)
++static int is_pmbr_valid(blkid_probe pr, int *has)
+ {
+ 	int flags = blkid_partitions_get_flags(pr);
+ 	unsigned char *data;
+ 	struct dos_partition *p;
+ 	int i;
+ 
++	if (has)
++		*has = 0;
+ 	if (flags & BLKID_PARTS_FORCE_GPT)
+ 		goto ok;			/* skip PMBR check */
+ 
+@@ -182,6 +184,8 @@ static int is_pmbr_valid(blkid_probe pr)
+ failed:
+ 	return 0;
+ ok:
++	if (has)
++		*has = 1;
+ 	return 1;
+ }
+ 
+@@ -305,7 +309,7 @@ static int probe_gpt_pt(blkid_probe pr,
+ 	if (last_lba(pr, &lastlba))
+ 		goto nothing;
+ 
+-	if (!is_pmbr_valid(pr))
++	if (!is_pmbr_valid(pr, NULL))
+ 		goto nothing;
+ 
+ 	h = get_gpt_header(pr, &hdr, &e, (lba = GPT_PRIMARY_LBA), lastlba);
+@@ -410,3 +414,39 @@ const struct blkid_idinfo gpt_pt_idinfo
+ 	.magics		= BLKID_NONE_MAGIC
+ };
+ 
++
++
++/* probe for *alone* protective MBR */
++static int probe_pmbr_pt(blkid_probe pr,
++		const struct blkid_idmag *mag __attribute__((__unused__)))
++{
++	int has = 0;
++	struct gpt_entry *e;
++	uint64_t lastlba = 0;
++	struct gpt_header hdr;
++
++	if (last_lba(pr, &lastlba))
++		goto nothing;
++
++	is_pmbr_valid(pr, &has);
++	if (!has)
++		goto nothing;
++
++	if (!get_gpt_header(pr, &hdr, &e, GPT_PRIMARY_LBA, lastlba) &&
++	    !get_gpt_header(pr, &hdr, &e, lastlba, lastlba))
++		return 0;
++nothing:
++	return 1;
++}
++
++const struct blkid_idinfo pmbr_pt_idinfo =
++{
++	.name		= "PMBR",
++	.probefunc	= probe_pmbr_pt,
++	.magics		=
++	{
++		{ .magic = "\x55\xAA", .len = 2, .sboff = 510 },
++		{ NULL }
++	}
++};
++
+diff -up util-linux-2.23.2/libblkid/src/partitions/partitions.c.kzak util-linux-2.23.2/libblkid/src/partitions/partitions.c
+--- util-linux-2.23.2/libblkid/src/partitions/partitions.c.kzak	2013-07-30 10:39:26.207738249 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/partitions.c	2014-01-23 11:06:17.364011293 +0100
+@@ -125,6 +125,7 @@ static const struct blkid_idinfo *idinfo
+ 	&sun_pt_idinfo,
+ 	&dos_pt_idinfo,
+ 	&gpt_pt_idinfo,
++	&pmbr_pt_idinfo,	/* always after GPT */
+ 	&mac_pt_idinfo,
+ 	&ultrix_pt_idinfo,
+ 	&bsd_pt_idinfo,
+diff -up util-linux-2.23.2/libblkid/src/partitions/partitions.h.kzak util-linux-2.23.2/libblkid/src/partitions/partitions.h
+--- util-linux-2.23.2/libblkid/src/partitions/partitions.h.kzak	2013-07-30 10:39:26.208738259 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/partitions.h	2014-01-23 11:06:17.364011293 +0100
+@@ -59,6 +59,7 @@ extern const struct blkid_idinfo mac_pt_
+ extern const struct blkid_idinfo dos_pt_idinfo;
+ extern const struct blkid_idinfo minix_pt_idinfo;
+ extern const struct blkid_idinfo gpt_pt_idinfo;
++extern const struct blkid_idinfo pmbr_pt_idinfo;
+ extern const struct blkid_idinfo ultrix_pt_idinfo;
+ 
+ #endif /* BLKID_PARTITIONS_H */

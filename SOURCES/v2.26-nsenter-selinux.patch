@@ -1,0 +1,129 @@
+diff -up util-linux-2.23.2/sys-utils/Makemodule.am.kzak util-linux-2.23.2/sys-utils/Makemodule.am
+--- util-linux-2.23.2/sys-utils/Makemodule.am.kzak	2015-06-26 10:21:34.337221288 +0200
++++ util-linux-2.23.2/sys-utils/Makemodule.am	2015-06-26 10:22:18.719885983 +0200
+@@ -308,7 +308,7 @@ if BUILD_NSENTER
+ usrbin_exec_PROGRAMS += nsenter
+ dist_man_MANS += sys-utils/nsenter.1
+ nsenter_SOURCES = sys-utils/nsenter.c
+-nsenter_LDADD = $(LDADD) libcommon.la
++nsenter_LDADD = $(LDADD) libcommon.la $(SELINUX_LIBS)
+ endif
+ 
+ if BUILD_HWCLOCK
+diff -up util-linux-2.23.2/sys-utils/nsenter.1.kzak util-linux-2.23.2/sys-utils/nsenter.1
+--- util-linux-2.23.2/sys-utils/nsenter.1.kzak	2015-06-26 10:14:00.947646586 +0200
++++ util-linux-2.23.2/sys-utils/nsenter.1	2015-06-26 10:21:34.337221288 +0200
+@@ -155,6 +155,11 @@ Do not fork before exec'ing the specifie
+ PID namespace, \fBnsenter\fP calls \fBfork\fP before calling \fBexec\fP so that
+ any children will also be in the newly entered PID namespace.
+ .TP
++\fB\-Z\fR, \fB\-\-follow\-context\fR
++Set the SELinux security context used for executing a new process according to
++already running process specified by \fB\-\-target\fR PID. (The util-linux has
++to be compiled with SELinux support otherwise the option is unavailable.)
++.TP
+ \fB\-V\fR, \fB\-\-version\fR
+ Display version information and exit.
+ .TP
+@@ -163,10 +168,14 @@ Display help text and exit.
+ .SH SEE ALSO
+ .BR setns (2),
+ .BR clone (2)
+-.SH AUTHOR
+-.MT ebiederm@xmission.com
++.SH AUTHORS
++.UR biederm@xmission.com
+ Eric Biederman
+-.ME
++.UE
++.br
++.UR kzak@redhat.com
++Karel Zak
++.UE
+ .SH AVAILABILITY
+ The nsenter command is part of the util-linux package and is available from
+ .UR ftp://\:ftp.kernel.org\:/pub\:/linux\:/utils\:/util-linux/
+diff -up util-linux-2.23.2/sys-utils/nsenter.c.kzak util-linux-2.23.2/sys-utils/nsenter.c
+--- util-linux-2.23.2/sys-utils/nsenter.c.kzak	2015-06-26 10:14:00.947646586 +0200
++++ util-linux-2.23.2/sys-utils/nsenter.c	2015-06-26 10:21:34.337221288 +0200
+@@ -30,6 +30,10 @@
+ #include <sys/wait.h>
+ #include <grp.h>
+ 
++#ifdef HAVE_LIBSELINUX
++# include <selinux/selinux.h>
++#endif
++
+ #include "strutils.h"
+ #include "nls.h"
+ #include "c.h"
+@@ -82,6 +86,9 @@ static void usage(int status)
+ 	fputs(_(" -r, --root[=<dir>]     set the root directory\n"), out);
+ 	fputs(_(" -w, --wd[=<dir>]       set the working directory\n"), out);
+ 	fputs(_(" -F, --no-fork          do not fork before exec'ing <program>\n"), out);
++#ifdef HAVE_LIBSELINUX
++	fputs(_(" -Z, --follow-context   set SELinux context according to --target PID\n"), out);
++#endif
+ 
+ 	fputs(USAGE_SEPARATOR, out);
+ 	fputs(USAGE_HELP, out);
+@@ -185,6 +192,9 @@ int main(int argc, char *argv[])
+ 		{ "wd", optional_argument, NULL, 'w' },
+ 		{ "no-fork", no_argument, NULL, 'F' },
+ 		{ "preserve-credentials", no_argument, NULL, OPT_PRESERVE_CRED },
++#ifdef HAVE_LIBSELINUX
++		{ "follow-context", no_argument, NULL, 'Z' },
++#endif
+ 		{ NULL, 0, NULL, 0 }
+ 	};
+ 
+@@ -194,6 +204,9 @@ int main(int argc, char *argv[])
+ 	int do_fork = -1; /* unknown yet */
+ 	uid_t uid = 0;
+ 	gid_t gid = 0;
++#ifdef HAVE_LIBSELINUX
++	bool selinux = 0;
++#endif
+ 
+ 	setlocale(LC_ALL, "");
+ 	bindtextdomain(PACKAGE, LOCALEDIR);
+@@ -201,7 +214,7 @@ int main(int argc, char *argv[])
+ 	atexit(close_stdout);
+ 
+ 	while ((c =
+-		getopt_long(argc, argv, "+hVt:m::u::i::n::p::U::S:G:r::w::F",
++		getopt_long(argc, argv, "+hVt:m::u::i::n::p::U::S:G:r::w::FZ",
+ 			    longopts, NULL)) != -1) {
+ 		switch (c) {
+ 		case 'h':
+@@ -275,11 +288,30 @@ int main(int argc, char *argv[])
+ 		case OPT_PRESERVE_CRED:
+ 			preserve_cred = 1;
+ 			break;
++#ifdef HAVE_LIBSELINUX
++		case 'Z':
++			selinux = 1;
++			break;
++#endif
+ 		default:
+ 			usage(EXIT_FAILURE);
+ 		}
+ 	}
+ 
++#ifdef HAVE_LIBSELINUX
++	if (selinux && is_selinux_enabled() > 0) {
++		char *scon = NULL;
++
++		if (!namespace_target_pid)
++			errx(EXIT_FAILURE, _("no target PID specified for --follow-context"));
++		if (getpidcon(namespace_target_pid, &scon) < 0)
++			errx(EXIT_FAILURE, _("failed to get %d SELinux context"),
++					(int) namespace_target_pid);
++		if (setexeccon(scon) < 0)
++			errx(EXIT_FAILURE, _("failed to set exec context to '%s'"), scon);
++		freecon(scon);
++	}
++#endif
+ 	/*
+ 	 * Open remaining namespace and directory descriptors.
+ 	 */

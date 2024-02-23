@@ -1,0 +1,5242 @@
+diff -up util-linux-2.23.2/configure.ac.kzak util-linux-2.23.2/configure.ac
+--- util-linux-2.23.2/configure.ac.kzak	2013-07-30 10:39:26.188738061 +0200
++++ util-linux-2.23.2/configure.ac	2014-09-25 14:41:48.980843829 +0200
+@@ -46,6 +46,13 @@ LIBMOUNT_LT_MINOR=1
+ LIBMOUNT_LT_MICRO=0
+ LIBMOUNT_VERSION_INFO=`expr $LIBMOUNT_LT_MAJOR + $LIBMOUNT_LT_MINOR`:$LIBMOUNT_LT_MICRO:$LIBMOUNT_LT_MINOR
+ 
++dnl libsmartcols version
++LIBSMARTCOLS_VERSION="$PACKAGE_VERSION_MAJOR.$PACKAGE_VERSION_MINOR.$PACKAGE_VERSION_RELEASE"
++LIBSMARTCOLS_LT_MAJOR=1
++LIBSMARTCOLS_LT_MINOR=1
++LIBSMARTCOLS_LT_MICRO=0
++LIBSMARTCOLS_VERSION_INFO=`expr $LIBSMARTCOLS_LT_MAJOR + $LIBSMARTCOLS_LT_MINOR`:$LIBSMARTCOLS_LT_MICRO:$LIBSMARTCOLS_LT_MINOR
++
+ # Check whether exec_prefix=/usr:
+ case $exec_prefix:$prefix in
+ NONE:NONE | NONE:/usr | /usr:*)
+@@ -765,6 +772,18 @@ AC_DEFINE_UNQUOTED(LIBMOUNT_VERSION, "$L
+ 
+ 
+ dnl
++dnl libsmartcols
++dnl
++UL_BUILD_INIT([libsmartcols], [yes])
++AM_CONDITIONAL([BUILD_LIBSMARTCOLS], [test "x$build_libsmartcols" = xyes])
++AM_CONDITIONAL([BUILD_LIBSMARTCOLS_TESTS], [test "x$build_libsmartcols" = xyes -a "x$enable_static" = xyes])
++
++AC_SUBST([LIBSMARTCOLS_VERSION])
++AC_SUBST([LIBSMARTCOLS_VERSION_INFO])
++AC_DEFINE_UNQUOTED([LIBSMARTCOLS_VERSION], ["$LIBSMARTCOLS_VERSION"], [libsmartcols version string])
++
++
++dnl
+ dnl libfdisk is enabled all time if possible
+ dnl
+ UL_BUILD_INIT([libfdisk], [check])
+@@ -1500,6 +1519,9 @@ libblkid/src/blkid.h
+ libmount/docs/Makefile
+ libmount/docs/version.xml
+ libmount/src/libmount.h
++libsmartcols/docs/Makefile
++libsmartcols/docs/version.xml
++libsmartcols/src/libsmartcols.h
+ po/Makefile.in
+ ])
+ 
+diff -up util-linux-2.23.2/include/carefulputc.h.kzak util-linux-2.23.2/include/carefulputc.h
+--- util-linux-2.23.2/include/carefulputc.h.kzak	2012-11-29 16:18:33.956147961 +0100
++++ util-linux-2.23.2/include/carefulputc.h	2014-09-25 14:41:48.980843829 +0200
+@@ -26,4 +26,39 @@ static inline int carefulputc(int c, FIL
+ 	return (ret < 0) ? EOF : 0;
+ }
+ 
++static inline void fputs_quoted(const char *data, FILE *out)
++{
++	const char *p;
++
++	fputc('"', out);
++	for (p = data; p && *p; p++) {
++		if ((unsigned char) *p == 0x22 ||		/* " */
++		    (unsigned char) *p == 0x5c ||		/* \ */
++		    !isprint((unsigned char) *p) ||
++		    iscntrl((unsigned char) *p)) {
++
++			fprintf(out, "\\x%02x", (unsigned char) *p);
++		} else
++			fputc(*p, out);
++	}
++	fputc('"', out);
++}
++
++static inline void fputs_nonblank(const char *data, FILE *out)
++{
++	const char *p;
++
++	for (p = data; p && *p; p++) {
++		if (isblank((unsigned char) *p) ||
++		    (unsigned char) *p == 0x5c ||		/* \ */
++		    !isprint((unsigned char) *p) ||
++		    iscntrl((unsigned char) *p)) {
++
++			fprintf(out, "\\x%02x", (unsigned char) *p);
++
++		} else
++			fputc(*p, out);
++	}
++}
++
+ #endif  /*  _CAREFUULPUTC_H  */
+diff -up util-linux-2.23.2/include/debug.h.kzak util-linux-2.23.2/include/debug.h
+--- util-linux-2.23.2/include/debug.h.kzak	2014-09-25 14:41:48.981843839 +0200
++++ util-linux-2.23.2/include/debug.h	2014-09-25 14:41:48.981843839 +0200
+@@ -0,0 +1,126 @@
++/*
++ * Copyright (C) 2014 Ondrej Oprala <ooprala@redhat.com>
++ *
++ * This file may be distributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++#ifndef UTIL_LINUX_DEBUG_H
++#define UTIL_LINUX_DEBUG_H
++
++#include <stdarg.h>
++#include <string.h>
++
++struct dbg_mask { char *mname; int val; };
++#define UL_DEBUG_EMPTY_MASKNAMES {{ NULL, 0 }}
++
++#define UL_DEBUG_DEFINE_MASK(m) int m ## _debug_mask
++#define UL_DEBUG_DECLARE_MASK(m) extern UL_DEBUG_DEFINE_MASK(m)
++#define UL_DEBUG_DEFINE_MASKANEMS(m) static const struct dbg_mask m ## _masknames[]
++
++/* p - flag prefix, m - flag postfix */
++#define UL_DEBUG_DEFINE_FLAG(p, m) p ## m
++
++/* l - library name, p - flag prefix, m - flag postfix, x - function */
++#define __UL_DBG(l, p, m, x) \
++	do { \
++		if ((p ## m) & l ## _debug_mask) { \
++			fprintf(stderr, "%d: %s: %8s: ", getpid(), # l, # m); \
++			x; \
++		} \
++	} while (0)
++
++#define __UL_DBG_CALL(l, p, m, x) \
++	do { \
++		if ((p ## m) & l ## _debug_mask) { \
++			x; \
++		} \
++	} while (0)
++
++#define __UL_DBG_FLUSH(l, p) \
++	do { \
++		if (l ## _debug_mask && \
++		    l ## _debug_mask != p ## INIT) { \
++			fflush(stderr); \
++		} \
++	} while (0)
++
++
++#define __UL_INIT_DEBUG(lib, pref, mask, env) \
++	do { \
++		if (lib ## _debug_mask & pref ## INIT) \
++		; \
++		else if (!mask) { \
++			char *str = getenv(# env); \
++			if (str) \
++				lib ## _debug_mask = parse_envmask(lib ## _masknames, str); \
++		} else \
++			lib ## _debug_mask = mask; \
++		lib ## _debug_mask |= pref ## INIT; \
++		if (lib ## _debug_mask != pref ## INIT) { \
++			__UL_DBG(lib, pref, INIT, ul_debug("library debug mask: 0x%04x", \
++					lib ## _debug_mask)); \
++		} \
++	} while (0)
++
++
++static inline void __attribute__ ((__format__ (__printf__, 1, 2)))
++ul_debug(const char *mesg, ...)
++{
++	va_list ap;
++	va_start(ap, mesg);
++	vfprintf(stderr, mesg, ap);
++	va_end(ap);
++	fputc('\n', stderr);
++}
++
++static inline void __attribute__ ((__format__ (__printf__, 2, 3)))
++ul_debugobj(void *handler, const char *mesg, ...)
++{
++	va_list ap;
++
++	if (handler)
++		fprintf(stderr, "[%p]: ", handler);
++	va_start(ap, mesg);
++	vfprintf(stderr, mesg, ap);
++	va_end(ap);
++	fputc('\n', stderr);
++}
++
++static inline int parse_envmask(const struct dbg_mask const flagnames[],
++				const char *mask)
++{
++	int res;
++	char *ptr;
++
++	/* let's check for a numeric mask first */
++	res = strtoul(mask, &ptr, 0);
++
++	/* perhaps it's a comma-separated string? */
++	if (*ptr != '\0' && flagnames) {
++		char *msbuf, *ms, *name;
++		res = 0;
++
++		ms = msbuf = strdup(mask);
++		if (!ms)
++			return res;
++
++		while ((name = strtok_r(ms, ",", &ptr))) {
++			size_t i = 0;
++			ms = ptr;
++
++			while (flagnames[i].mname) {
++				if (!strcmp(name, flagnames[i].mname)) {
++					res |= flagnames[i].val;
++					break;
++				}
++				++i;
++			}
++			/* nothing else we can do by OR-ing the mask */
++			if (res == 0xffff)
++				break;
++		}
++		free(msbuf);
++	}
++	return res;
++}
++#endif /* UTIL_LINUX_DEBUG_H */
+diff -up util-linux-2.23.2/include/list.h.kzak util-linux-2.23.2/include/list.h
+--- util-linux-2.23.2/include/list.h.kzak	2013-06-13 09:46:10.396650417 +0200
++++ util-linux-2.23.2/include/list.h	2014-09-25 14:41:48.981843839 +0200
+@@ -212,14 +212,16 @@ _INLINE_ void list_splice(struct list_he
+  * sentinel head node, "prev" links not maintained.
+  */
+ _INLINE_ struct list_head *merge(int (*cmp)(struct list_head *a,
+-					  struct list_head *b),
++					  struct list_head *b,
++					  void *data),
++			       void *data,
+ 			       struct list_head *a, struct list_head *b)
+ {
+ 	struct list_head head, *tail = &head;
+ 
+ 	while (a && b) {
+ 		/* if equal, take 'a' -- important for sort stability */
+-		if ((*cmp)(a, b) <= 0) {
++		if ((*cmp)(a, b, data) <= 0) {
+ 			tail->next = a;
+ 			a = a->next;
+ 		} else {
+@@ -240,7 +242,9 @@ _INLINE_ struct list_head *merge(int (*c
+  * throughout.
+  */
+ _INLINE_ void merge_and_restore_back_links(int (*cmp)(struct list_head *a,
+-						    struct list_head *b),
++						    struct list_head *b,
++						    void *data),
++					 void *data,
+ 					 struct list_head *head,
+ 					 struct list_head *a, struct list_head *b)
+ {
+@@ -248,7 +252,7 @@ _INLINE_ void merge_and_restore_back_lin
+ 
+ 	while (a && b) {
+ 		/* if equal, take 'a' -- important for sort stability */
+-		if ((*cmp)(a, b) <= 0) {
++		if ((*cmp)(a, b, data) <= 0) {
+ 			tail->next = a;
+ 			a->prev = tail;
+ 			a = a->next;
+@@ -268,7 +272,7 @@ _INLINE_ void merge_and_restore_back_lin
+ 		 * element comparison is needed, so the client's cmp()
+ 		 * routine can invoke cond_resched() periodically.
+ 		 */
+-		(*cmp)(tail->next, tail->next);
++		(*cmp)(tail->next, tail->next, data);
+ 
+ 		tail->next->prev = tail;
+ 		tail = tail->next;
+@@ -294,7 +298,9 @@ _INLINE_ void merge_and_restore_back_lin
+  */
+ _INLINE_ void list_sort(struct list_head *head,
+ 			int (*cmp)(struct list_head *a,
+-				   struct list_head *b))
++				   struct list_head *b,
++				   void *data),
++			void *data)
+ {
+ 	struct list_head *part[MAX_LIST_LENGTH_BITS+1]; /* sorted partial lists
+ 							   -- last slot is a sentinel */
+@@ -316,7 +322,7 @@ _INLINE_ void list_sort(struct list_head
+ 		cur->next = NULL;
+ 
+ 		for (lev = 0; part[lev]; lev++) {
+-			cur = merge(cmp, part[lev], cur);
++			cur = merge(cmp, data, part[lev], cur);
+ 			part[lev] = NULL;
+ 		}
+ 		if (lev > max_lev) {
+@@ -330,11 +336,12 @@ _INLINE_ void list_sort(struct list_head
+ 
+ 	for (lev = 0; lev < max_lev; lev++)
+ 		if (part[lev])
+-			list = merge(cmp, part[lev], list);
++			list = merge(cmp, data, part[lev], list);
+ 
+-	merge_and_restore_back_links(cmp, head, part[max_lev], list);
++	merge_and_restore_back_links(cmp, data, head, part[max_lev], list);
+ }
+ 
++
+ #undef _INLINE_
+ 
+ #endif /* UTIL_LINUX_LIST_H */
+diff -up util-linux-2.23.2/include/mbsalign.h.kzak util-linux-2.23.2/include/mbsalign.h
+--- util-linux-2.23.2/include/mbsalign.h.kzak	2013-06-13 09:46:10.397650425 +0200
++++ util-linux-2.23.2/include/mbsalign.h	2014-09-25 14:41:48.981843839 +0200
+@@ -1,5 +1,6 @@
+ /* Align/Truncate a string in a given screen width
+    Copyright (C) 2009-2010 Free Software Foundation, Inc.
++   Copyright (C) 2010-2013 Karel Zak <kzak@redhat.com>
+ 
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License as published by
+@@ -13,8 +14,9 @@
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+-
+-#include <stddef.h>
++#ifndef UTIL_LINUX_MBSALIGN_H
++# define UTIL_LINUX_MBSALIGN_H
++# include <stddef.h>
+ 
+ typedef enum { MBS_ALIGN_LEFT, MBS_ALIGN_RIGHT, MBS_ALIGN_CENTER } mbs_align_t;
+ 
+@@ -43,3 +45,12 @@ extern size_t mbs_truncate(char *str, si
+ extern size_t mbsalign (const char *src, char *dest,
+ 			size_t dest_size,  size_t *width,
+ 			mbs_align_t align, int flags);
++
++extern size_t mbs_safe_nwidth(const char *buf, size_t bufsz, size_t *sz);
++extern size_t mbs_safe_width(const char *s);
++
++extern char *mbs_safe_encode(const char *s, size_t *width);
++extern char *mbs_safe_encode_to_buffer(const char *s, size_t *width, char *buf);
++extern size_t mbs_safe_encode_size(size_t bytes);
++
++#endif /* UTIL_LINUX_MBSALIGN_H */
+diff -up util-linux-2.23.2/lib/mbsalign.c.kzak util-linux-2.23.2/lib/mbsalign.c
+--- util-linux-2.23.2/lib/mbsalign.c.kzak	2013-07-30 10:39:26.203738210 +0200
++++ util-linux-2.23.2/lib/mbsalign.c	2014-09-25 14:41:48.982843848 +0200
+@@ -23,17 +23,193 @@
+ #include <stdio.h>
+ #include <stdbool.h>
+ #include <limits.h>
++#include <ctype.h>
+ 
+ #include "c.h"
+ #include "mbsalign.h"
+ #include "widechar.h"
+ 
+-
+ #ifdef HAVE_WIDECHAR
+ /* Replace non printable chars.
+    Note \t and \n etc. are non printable.
+    Return 1 if replacement made, 0 otherwise.  */
+ 
++/*
++ * Counts number of cells in multibyte string. For all control and
++ * non-printable chars is the result width enlarged to store \x?? hex
++ * sequence. See mbs_safe_encode().
++ *
++ * Returns: number of cells, @sz returns number of bytes.
++ */
++size_t mbs_safe_nwidth(const char *buf, size_t bufsz, size_t *sz)
++{
++	mbstate_t st;
++	const char *p = buf, *last = buf;
++	size_t width = 0, bytes = 0;
++
++	memset(&st, 0, sizeof(st));
++
++	if (p && *p && bufsz)
++		last = p + (bufsz - 1);
++
++	while (p && *p && p <= last) {
++		if (iscntrl((unsigned char) *p)) {
++			width += 4, bytes += 4;		/* *p encoded to \x?? */
++			p++;
++		}
++#ifdef HAVE_WIDECHAR
++		else {
++			wchar_t wc;
++			size_t len = mbrtowc(&wc, p, MB_CUR_MAX, &st);
++
++			if (len == 0)
++				break;
++
++			if (len == (size_t) -1 || len == (size_t) -2) {
++				len = 1;
++				if (isprint((unsigned char) *p))
++					width += 1, bytes += 1;
++				else
++					width += 4, bytes += 4;
++
++			} else if (!iswprint(wc)) {
++				width += len * 4;	/* hex encode whole sequence */
++				bytes += len * 4;
++			} else {
++				width += wcwidth(wc);	/* number of cells */
++				bytes += len;		/* number of bytes */
++			}
++			p += len;
++		}
++#else
++		else if (!isprint((unsigned char) *p)) {
++			width += 4, bytes += 4;		/* *p encoded to \x?? */
++			p++;
++		} else {
++			width++, bytes++;
++			p++;
++		}
++#endif
++	}
++
++	if (sz)
++		*sz = bytes;
++	return width;
++}
++
++size_t mbs_safe_width(const char *s)
++{
++	if (!s || !*s)
++		return 0;
++	return mbs_safe_nwidth(s, strlen(s), NULL);
++}
++
++/*
++ * Copy @s to @buf and replace control and non-printable chars with
++ * \x?? hex sequence. The @width returns number of cells.
++ *
++ * The @buf has to be big enough to store mbs_safe_encode_size(strlen(s)))
++ * bytes.
++ */
++char *mbs_safe_encode_to_buffer(const char *s, size_t *width, char *buf)
++{
++	mbstate_t st;
++	const char *p = s;
++	char *r;
++	size_t sz = s ? strlen(s) : 0;
++
++	if (!sz || !buf)
++		return NULL;
++
++	memset(&st, 0, sizeof(st));
++
++	r = buf;
++	*width = 0;
++
++	while (p && *p) {
++		if (iscntrl((unsigned char) *p)) {
++			sprintf(r, "\\x%02x", (unsigned char) *p);
++			r += 4;
++			*width += 4;
++			p++;
++		}
++#ifdef HAVE_WIDECHAR
++		else {
++			wchar_t wc;
++			size_t len = mbrtowc(&wc, p, MB_CUR_MAX, &st);
++
++			if (len == 0)
++				break;		/* end of string */
++
++			if (len == (size_t) -1 || len == (size_t) -2) {
++				len = 1;
++				/*
++				 * Not valid multibyte sequence -- maybe it's
++				 * printable char according to the current locales.
++				 */
++				if (!isprint((unsigned char) *p)) {
++					sprintf(r, "\\x%02x", (unsigned char) *p);
++					r += 4;
++					*width += 4;
++				} else {
++					width++;
++					*r++ = *p;
++				}
++			} else if (!iswprint(wc)) {
++				size_t i;
++				for (i = 0; i < len; i++) {
++					sprintf(r, "\\x%02x", (unsigned char) *p);
++					r += 4;
++					*width += 4;
++				}
++			} else {
++				memcpy(r, p, len);
++				r += len;
++				*width += wcwidth(wc);
++			}
++			p += len;
++		}
++#else
++		else if (!isprint((unsigned char) *p)) {
++			sprintf(r, "\\x%02x", (unsigned char) *p);
++			p++;
++			r += 4;
++			*width += 4;
++		} else {
++			*r++ = *p++;
++			*width++;
++		}
++#endif
++	}
++
++	*r = '\0';
++
++	return buf;
++}
++
++size_t mbs_safe_encode_size(size_t bytes)
++{
++	return (bytes * 4) + 1;
++}
++
++/*
++ * Returns allocated string where all control and non-printable chars are
++ * replaced with \x?? hex sequence.
++ */
++char *mbs_safe_encode(const char *s, size_t *width)
++{
++	size_t sz = s ? strlen(s) : 0;
++	char *buf;
++
++	if (!sz)
++		return NULL;
++	buf = malloc(mbs_safe_encode_size(sz));
++	if (!buf)
++		return NULL;
++
++	return mbs_safe_encode_to_buffer(s, width, buf);
++}
++
+ static bool
+ wc_ensure_printable (wchar_t *wchars)
+ {
+@@ -254,8 +430,8 @@ mbsalign_unibyte:
+   if (dest_size != 0)
+     {
+       char *dest_end = dest + dest_size - 1;
+-      size_t start_spaces = n_spaces / 2 + n_spaces % 2;
+-      size_t end_spaces = n_spaces / 2;
++      size_t start_spaces;
++      size_t end_spaces;
+ 
+       switch (align)
+         {
+diff -up util-linux-2.23.2/libsmartcols/COPYING.kzak util-linux-2.23.2/libsmartcols/COPYING
+--- util-linux-2.23.2/libsmartcols/COPYING.kzak	2014-09-25 14:41:48.983843858 +0200
++++ util-linux-2.23.2/libsmartcols/COPYING	2014-09-25 14:41:48.983843858 +0200
+@@ -0,0 +1,8 @@
++This library is free software; you can redistribute it and/or
++modify it under the terms of the GNU Lesser General Public
++License as published by the Free Software Foundation; either
++version 2.1 of the License, or (at your option) any later
++version.
++
++The complete text of the license is available in the
++../Documentation/licenses/COPYING.LGPLv2.1 file.
+diff -up util-linux-2.23.2/libsmartcols/docs/.gitignore.kzak util-linux-2.23.2/libsmartcols/docs/.gitignore
+--- util-linux-2.23.2/libsmartcols/docs/.gitignore.kzak	2014-09-25 14:41:48.983843858 +0200
++++ util-linux-2.23.2/libsmartcols/docs/.gitignore	2014-09-25 14:41:48.983843858 +0200
+@@ -0,0 +1,18 @@
++*-decl-list.txt
++*-decl.txt
++*-overrides.txt
++*-undeclared.txt
++*-undocumented.txt
++*-unused.txt
++*.args
++*.bak
++*.hierarchy
++*.interfaces
++*.prerequisites
++*.signals
++*.stamp
++*.types
++html/*
++tmpl/*
++version.xml
++xml/*
+diff -up util-linux-2.23.2/libsmartcols/docs/libsmartcols-docs.xml.kzak util-linux-2.23.2/libsmartcols/docs/libsmartcols-docs.xml
+--- util-linux-2.23.2/libsmartcols/docs/libsmartcols-docs.xml.kzak	2014-09-25 14:41:48.984843867 +0200
++++ util-linux-2.23.2/libsmartcols/docs/libsmartcols-docs.xml	2014-09-25 14:41:48.984843867 +0200
+@@ -0,0 +1,52 @@
++<?xml version="1.0"?>
++<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.3//EN"
++               "http://www.oasis-open.org/docbook/xml/4.3/docbookx.dtd"
++[
++  <!ENTITY version SYSTEM "version.xml">
++]>
++<book id="index" xmlns:xi="http://www.w3.org/2003/XInclude">
++  <bookinfo>
++    <title>libsmartcols Reference Manual</title>
++    <releaseinfo>for libsmartcols version &version;</releaseinfo>
++    <copyright>
++      <year>2014</year>
++      <holder>Karel Zak &lt;kzak@redhat.com&gt;</holder>
++    </copyright>
++  </bookinfo>
++
++  <part id="gtk">
++    <title>libsmartcols Overview</title>
++    <partintro>
++    <para>
++The libsmartcols library is used for smart adaptive formatting of tabular data.
++    </para>
++    <para>
++The library is part of the util-linux package since version 2.25 and is
++available from ftp://ftp.kernel.org/pub/linux/utils/util-linux/.
++    </para>
++  </partintro>
++ </part>
++
++  <part>
++    <title>Data manipulation</title>
++    <xi:include href="xml/table.xml"/>
++    <xi:include href="xml/column.xml"/>
++    <xi:include href="xml/line.xml"/>
++    <xi:include href="xml/cell.xml"/>
++    <xi:include href="xml/symbols.xml"/>
++  </part>
++  <part>
++    <title>Printing</title>
++    <xi:include href="xml/table_print.xml"/>
++  </part>
++  <part>
++    <title>Misc</title>
++    <xi:include href="xml/iter.xml"/>
++    <xi:include href="xml/version-utils.xml"/>
++    <xi:include href="xml/init.xml"/>
++  </part>
++  <index id="api-index-full">
++    <title>API Index</title>
++    <xi:include href="xml/api-index-full.xml"><xi:fallback /></xi:include>
++  </index>
++</book>
+diff -up util-linux-2.23.2/libsmartcols/docs/libsmartcols-sections.txt.kzak util-linux-2.23.2/libsmartcols/docs/libsmartcols-sections.txt
+--- util-linux-2.23.2/libsmartcols/docs/libsmartcols-sections.txt.kzak	2014-09-25 14:41:48.984843867 +0200
++++ util-linux-2.23.2/libsmartcols/docs/libsmartcols-sections.txt	2014-09-25 14:41:48.984843867 +0200
+@@ -0,0 +1,146 @@
++<SECTION>
++<FILE>cell</FILE>
++libscols_cell
++scols_cell_copy_content
++scols_cell_get_color
++scols_cell_get_data
++scols_cell_get_userdata
++scols_cell_refer_data
++scols_cell_set_color
++scols_cell_set_data
++scols_cell_set_userdata
++scols_cmpstr_cells
++scols_reset_cell
++</SECTION>
++
++<SECTION>
++<FILE>column</FILE>
++libscols_column
++scols_column_get_color
++scols_column_get_flags
++scols_column_get_header
++scols_column_get_whint
++scols_column_is_noextremes
++scols_column_is_right
++scols_column_is_strict_width
++scols_column_is_tree
++scols_column_is_trunc
++scols_column_set_cmpfunc
++scols_column_set_color
++scols_column_set_flags
++scols_column_set_whint
++scols_copy_column
++scols_new_column
++scols_ref_column
++scols_unref_column
++</SECTION>
++
++<SECTION>
++<FILE>iter</FILE>
++libscols_iter
++scols_free_iter
++scols_iter_get_direction
++scols_new_iter
++scols_reset_iter
++</SECTION>
++
++<SECTION>
++<FILE>line</FILE>
++libscols_line
++scols_copy_line
++scols_line_add_child
++scols_line_alloc_cells
++scols_line_free_cells
++scols_line_get_cell
++scols_line_get_color
++scols_line_get_column_cell
++scols_line_get_ncells
++scols_line_get_parent
++scols_line_get_userdata
++scols_line_has_children
++scols_line_next_child
++scols_line_refer_data
++scols_line_remove_child
++scols_line_set_color
++scols_line_set_data
++scols_line_set_userdata
++scols_new_line
++scols_ref_line
++scols_unref_line
++</SECTION>
++
++<SECTION>
++<FILE>symbols</FILE>
++libscols_symbols
++scols_copy_symbols
++scols_new_symbols
++scols_ref_symbols
++scols_symbols_set_branch
++scols_symbols_set_right
++scols_symbols_set_vertical
++scols_unref_symbols
++</SECTION>
++
++<SECTION>
++<FILE>table</FILE>
++libscols_table
++scols_copy_table
++scols_new_table
++scols_ref_table
++scols_table_add_column
++scols_table_add_line
++scols_table_colors_wanted
++scols_table_enable_ascii
++scols_table_enable_colors
++scols_table_enable_export
++scols_table_enable_maxout
++scols_table_enable_noheadings
++scols_table_enable_raw
++scols_table_get_column
++scols_table_get_column_separator
++scols_table_get_line
++scols_table_get_line_separator
++scols_table_get_ncols
++scols_table_get_nlines
++scols_table_get_stream
++scols_table_is_ascii
++scols_table_is_empty
++scols_table_is_export
++scols_table_is_maxout
++scols_table_is_noheadings
++scols_table_is_raw
++scols_table_is_tree
++scols_table_new_column
++scols_table_new_line
++scols_table_next_column
++scols_table_next_line
++scols_table_reduce_termwidth
++scols_table_remove_column
++scols_table_remove_columns
++scols_table_remove_line
++scols_table_remove_lines
++scols_table_set_column_separator
++scols_table_set_line_separator
++scols_table_set_stream
++scols_table_set_symbols
++scols_sort_table
++scols_unref_table
++</SECTION>
++
++<SECTION>
++<FILE>table_print</FILE>
++scols_print_table
++scols_print_table_to_string
++</SECTION>
++
++<SECTION>
++<FILE>version-utils</FILE>
++scols_get_library_version
++scols_parse_version_string
++LIBSMARTCOLS_VERSION
++</SECTION>
++
++<SECTION>
++<FILE>init</FILE>
++scols_init_debug
++</SECTION>
+diff -up util-linux-2.23.2/libsmartcols/docs/Makefile.am.kzak util-linux-2.23.2/libsmartcols/docs/Makefile.am
+--- util-linux-2.23.2/libsmartcols/docs/Makefile.am.kzak	2014-09-25 14:41:48.984843867 +0200
++++ util-linux-2.23.2/libsmartcols/docs/Makefile.am	2014-09-25 14:41:48.984843867 +0200
+@@ -0,0 +1,93 @@
++## Process this file with automake to produce Makefile.in
++
++# We require automake 1.10 at least.
++AUTOMAKE_OPTIONS = 1.10
++
++# This is a blank Makefile.am for using gtk-doc.
++# Copy this to your project's API docs directory and modify the variables to
++# suit your project. See the GTK+ Makefiles in gtk+/docs/reference for examples
++# of using the various options.
++
++# The name of the module, e.g. 'glib'.
++DOC_MODULE=libsmartcols
++
++# Uncomment for versioned docs and specify the version of the module, e.g. '2'.
++#DOC_MODULE_VERSION=2
++
++# The top-level SGML file. You can change this if you want to.
++DOC_MAIN_SGML_FILE=$(DOC_MODULE)-docs.xml
++
++# The directory containing the source code. Relative to $(srcdir).
++# gtk-doc will search all .c & .h files beneath here for inline comments
++# documenting the functions and macros.
++# e.g. DOC_SOURCE_DIR=../../../gtk
++DOC_SOURCE_DIR=../src
++
++# Extra options to pass to gtkdoc-scangobj. Not normally needed.
++SCANGOBJ_OPTIONS=
++
++# Extra options to supply to gtkdoc-scan.
++# e.g. SCAN_OPTIONS=--deprecated-guards="GTK_DISABLE_DEPRECATED"
++SCAN_OPTIONS=
++
++# Extra options to supply to gtkdoc-mkdb.
++# e.g. MKDB_OPTIONS=--sgml-mode --output-format=xml
++MKDB_OPTIONS=--sgml-mode --output-format=xml --name-space mnt
++
++# Extra options to supply to gtkdoc-mktmpl
++# e.g. MKTMPL_OPTIONS=--only-section-tmpl
++MKTMPL_OPTIONS=
++
++# Extra options to supply to gtkdoc-mkhtml
++MKHTML_OPTIONS=
++
++# Extra options to supply to gtkdoc-fixref. Not normally needed.
++# e.g. FIXXREF_OPTIONS=--extra-dir=../gdk-pixbuf/html --extra-dir=../gdk/html
++FIXXREF_OPTIONS=
++
++# Used for dependencies. The docs will be rebuilt if any of these change.
++# e.g. HFILE_GLOB=$(top_srcdir)/gtk/*.h
++# e.g. CFILE_GLOB=$(top_srcdir)/gtk/*.c
++HFILE_GLOB=$(top_builddir)/libsmartcols/src/libsmartcols.h
++CFILE_GLOB=$(top_srcdir)/libsmartcols/src/*.c
++
++# Extra header to include when scanning, which are not under DOC_SOURCE_DIR
++# e.g. EXTRA_HFILES=$(top_srcdir}/contrib/extra.h
++EXTRA_HFILES=
++
++# Header files to ignore when scanning. Use base file name, no paths
++# e.g. IGNORE_HFILES=gtkdebug.h gtkintl.h
++IGNORE_HFILES=smartcolsP.h
++
++# Images to copy into HTML directory.
++# e.g. HTML_IMAGES=$(top_srcdir)/gtk/stock-icons/stock_about_24.png
++HTML_IMAGES=
++
++# Extra SGML files that are included by $(DOC_MAIN_SGML_FILE).
++# e.g. content_files=running.sgml building.sgml changes-2.0.sgml
++content_files = $(builddir)/version.xml
++
++# SGML files where gtk-doc abbrevations (#GtkWidget) are expanded
++# These files must be listed here *and* in content_files
++# e.g. expand_content_files=running.sgml
++expand_content_files=
++
++# CFLAGS and LDFLAGS for compiling gtkdoc-scangobj with your library.
++# Only needed if you are using gtkdoc-scangobj to dynamically query widget
++# signals and properties.
++# e.g. GTKDOC_CFLAGS=-I$(top_srcdir) -I$(top_builddir) $(GTK_DEBUG_FLAGS)
++# e.g. GTKDOC_LIBS=$(top_builddir)/gtk/$(gtktargetlib)
++GTKDOC_CFLAGS=
++GTKDOC_LIBS=
++
++# This includes the standard gtk-doc make rules, copied by gtkdocize.
++include $(top_srcdir)/config/gtk-doc.make
++
++# Other files to distribute
++# e.g. EXTRA_DIST += version.xml.in
++EXTRA_DIST += version.xml.in
++
++# Files not to distribute
++# for --rebuild-types in $(SCAN_OPTIONS), e.g. $(DOC_MODULE).types
++# for --rebuild-sections in $(SCAN_OPTIONS) e.g. $(DOC_MODULE)-sections.txt
++DISTCLEANFILES += version.xml
+diff -up util-linux-2.23.2/libsmartcols/docs/version.xml.in.kzak util-linux-2.23.2/libsmartcols/docs/version.xml.in
+--- util-linux-2.23.2/libsmartcols/docs/version.xml.in.kzak	2014-09-25 14:41:48.985843877 +0200
++++ util-linux-2.23.2/libsmartcols/docs/version.xml.in	2014-09-25 14:41:48.984843867 +0200
+@@ -0,0 +1 @@
++@VERSION@
+diff -up util-linux-2.23.2/libsmartcols/Makemodule.am.kzak util-linux-2.23.2/libsmartcols/Makemodule.am
+--- util-linux-2.23.2/libsmartcols/Makemodule.am.kzak	2014-09-25 14:41:48.983843858 +0200
++++ util-linux-2.23.2/libsmartcols/Makemodule.am	2014-09-25 14:41:48.983843858 +0200
+@@ -0,0 +1,14 @@
++if BUILD_LIBSMARTCOLS
++
++include libsmartcols/src/Makemodule.am
++
++if ENABLE_GTK_DOC
++# Docs uses separate Makefiles
++SUBDIRS += libsmartcols/docs
++endif
++
++# noinst for RHEL7: pkgconfig_DATA += libsmartcols/smartcols.pc
++PATHFILES      += libsmartcols/smartcols.pc
++EXTRA_DIST     += libsmartcols/COPYING
++
++endif # BUILD_LIBSMARTCOLS
+diff -up util-linux-2.23.2/libsmartcols/smartcols.pc.in.kzak util-linux-2.23.2/libsmartcols/smartcols.pc.in
+--- util-linux-2.23.2/libsmartcols/smartcols.pc.in.kzak	2014-09-25 14:41:48.985843877 +0200
++++ util-linux-2.23.2/libsmartcols/smartcols.pc.in	2014-09-25 14:41:48.985843877 +0200
+@@ -0,0 +1,10 @@
++prefix=@prefix@
++exec_prefix=@exec_prefix@
++libdir=@usrlib_execdir@
++includedir=@includedir@
++
++Name: smartcols
++Description: table or tree library
++Version: @LIBSMARTCOLS_VERSION@
++Cflags: -I${includedir}/libsmartcols
++Libs: -L${libdir} -lsmartcols
+diff -up util-linux-2.23.2/libsmartcols/src/cell.c.kzak util-linux-2.23.2/libsmartcols/src/cell.c
+--- util-linux-2.23.2/libsmartcols/src/cell.c.kzak	2014-09-25 14:41:48.986843886 +0200
++++ util-linux-2.23.2/libsmartcols/src/cell.c	2014-09-25 14:41:48.986843886 +0200
+@@ -0,0 +1,242 @@
++/*
++ * cell.c - functions for table handling at the cell level
++ *
++ * Copyright (C) 2014 Ondrej Oprala <ooprala@redhat.com>
++ * Copyright (C) 2014 Karel Zak <kzak@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++/**
++ * SECTION: cell
++ * @title: Cell
++ * @short_description: cell API
++ *
++ * An API to access and modify per-cell data and information. Note that cell is
++ * always part of the line. If you destroy (un-reference) a line than it
++ * destroys all line cells too.
++ */
++
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <ctype.h>
++
++#include "smartcolsP.h"
++
++/*
++ * The cell has no ref-counting, free() and new() functions. All is
++ * handled by libscols_line.
++ */
++
++/**
++ * scols_reset_cell:
++ * @ce: pointer to a struct libscols_cell instance
++ *
++ * Frees the cell's internal data and resets its status.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_reset_cell(struct libscols_cell *ce)
++{
++	assert(ce);
++
++	if (!ce)
++		return -EINVAL;
++
++	/*DBG(CELL, ul_debugobj(ce, "reset"));*/
++	free(ce->data);
++	free(ce->color);
++	memset(ce, 0, sizeof(*ce));
++	return 0;
++}
++
++/**
++ * scols_cell_set_data:
++ * @ce: a pointer to a struct libscols_cell instance
++ * @str: data (used for scols_printtable())
++ *
++ * Stores a copy of the @str in @ce.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_cell_set_data(struct libscols_cell *ce, const char *str)
++{
++	char *p = NULL;
++
++	assert(ce);
++
++	if (!ce)
++		return -EINVAL;
++	if (str) {
++		p = strdup(str);
++		if (!p)
++			return -ENOMEM;
++	}
++	free(ce->data);
++	ce->data = p;
++	return 0;
++}
++
++/**
++ * scols_cell_refer_data:
++ * @ce: a pointer to a struct libscols_cell instance
++ * @str: data (used for scols_printtable())
++ *
++ * Adds a reference to @str to @ce. The pointer is deallocated by
++ * scols_reset_cell() or scols_unref_line(). This function is mostly designed
++ * for situations when the data for the cell are already composed in allocated
++ * memory (e.g. asprintf()) to avoid extra unnecessary strdup().
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_cell_refer_data(struct libscols_cell *ce, char *str)
++{
++	assert(ce);
++
++	if (!ce)
++		return -EINVAL;
++	free(ce->data);
++	ce->data = str;
++	return 0;
++}
++
++/**
++ * scols_cell_get_data:
++ * @ce: a pointer to a struct libscols_cell instance
++ *
++ * Returns: data in @ce or NULL.
++ */
++const char *scols_cell_get_data(const struct libscols_cell *ce)
++{
++	assert(ce);
++	return ce ? ce->data : NULL;
++}
++
++/**
++ * scols_cell_set_userdata:
++ * @ce: a pointer to a struct libscols_cell instance
++ * @data: private user data
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_cell_set_userdata(struct libscols_cell *ce, void *data)
++{
++	assert(ce);
++
++	if (!ce)
++		return -EINVAL;
++	ce->userdata = data;
++	return 0;
++}
++
++/**
++ * scols_cell_get_userdata
++ * @ce: a pointer to a struct libscols_cell instance
++ *
++ * Returns: user data
++ */
++void *scols_cell_get_userdata(struct libscols_cell *ce)
++{
++	return ce ? ce->userdata : NULL;
++}
++
++/**
++ * scols_cmpstr_cells:
++ * @a: pointer to cell
++ * @b: pointer to cell
++ * @data: unused pointer to private data (defined by API)
++ *
++ * Compares cells data by strcmp(). The function is designed for
++ * scols_column_set_cmpfunc() and scols_sort_table().
++ *
++ * Returns: follows strcmp() return values.
++ */
++int scols_cmpstr_cells(struct libscols_cell *a,
++		       struct libscols_cell *b,
++		       __attribute__((__unused__)) void *data)
++{
++	const char *adata, *bdata;
++
++	if (a == b)
++		return 0;
++
++	adata = scols_cell_get_data(a);
++	bdata = scols_cell_get_data(b);
++
++	if (adata == NULL && bdata == NULL)
++		return 0;
++	if (adata == NULL)
++		return -1;
++	if (bdata == NULL)
++		return 1;
++	return strcmp(adata, bdata);
++}
++
++/**
++ * scols_cell_set_color:
++ * @ce: a pointer to a struct libscols_cell instance
++ * @color: ESC sequence
++ *
++ * Set the color of @ce to @color.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_cell_set_color(struct libscols_cell *ce, const char *color)
++{
++	char *p = NULL;
++
++	assert(ce);
++
++	if (!ce)
++		return -EINVAL;
++	if (color) {
++		p = strdup(color);
++		if (!p)
++			return -ENOMEM;
++	}
++	free(ce->color);
++	ce->color = p;
++	return 0;
++}
++
++/**
++ * scols_cell_get_color:
++ * @ce: a pointer to a struct libscols_cell instance
++ *
++ * Returns: the current color of @ce.
++ */
++const char *scols_cell_get_color(const struct libscols_cell *ce)
++{
++	assert(ce);
++	return ce ? ce->color : NULL;
++}
++
++/**
++ * scols_cell_copy_content:
++ * @dest: a pointer to a struct libscols_cell instance
++ * @src: a pointer to an immutable struct libscols_cell instance
++ *
++ * Copy the contents of @src into @dest.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_cell_copy_content(struct libscols_cell *dest,
++			    const struct libscols_cell *src)
++{
++	int rc;
++
++	assert(dest);
++	assert(src);
++
++	rc = scols_cell_set_data(dest, scols_cell_get_data(src));
++	if (!rc)
++		rc = scols_cell_set_color(dest, scols_cell_get_color(src));
++	if (!rc)
++		dest->userdata = src->userdata;
++
++	DBG(CELL, ul_debugobj((void *) src, "copy into %p", dest));
++	return rc;
++}
+diff -up util-linux-2.23.2/libsmartcols/src/column.c.kzak util-linux-2.23.2/libsmartcols/src/column.c
+--- util-linux-2.23.2/libsmartcols/src/column.c.kzak	2014-09-25 14:41:48.986843886 +0200
++++ util-linux-2.23.2/libsmartcols/src/column.c	2014-09-25 14:41:48.986843886 +0200
+@@ -0,0 +1,337 @@
++/*
++ * column.c - functions for table handling at the column level
++ *
++ * Copyright (C) 2014 Ondrej Oprala <ooprala@redhat.com>
++ * Copyright (C) 2014 Karel Zak <kzak@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++/**
++ * SECTION: column
++ * @title: Column
++ * @short_description: column API
++ *
++ * An API to access and modify per-column data and information.
++ */
++
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <ctype.h>
++
++#include "smartcolsP.h"
++
++/**
++ * scols_new_column:
++ *
++ * Allocates space for a new column.
++ *
++ * Returns: a pointer to a new struct libscols_cell instance, NULL in case of an ENOMEM error.
++ */
++struct libscols_column *scols_new_column(void)
++{
++	struct libscols_column *cl;
++
++	cl = calloc(1, sizeof(*cl));
++	if (!cl)
++		return NULL;
++	DBG(COL, ul_debugobj(cl, "alloc"));
++	cl->refcount = 1;
++	INIT_LIST_HEAD(&cl->cl_columns);
++	return cl;
++}
++
++/**
++ * scols_ref_column:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Increases the refcount of @cl.
++ */
++void scols_ref_column(struct libscols_column *cl)
++{
++	if (cl)
++		cl->refcount++;
++}
++
++/**
++ * scols_unref_column:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Decreases the refcount of @cl. When the count falls to zero, the instance
++ * is automatically deallocated.
++ */
++void scols_unref_column(struct libscols_column *cl)
++{
++	if (cl && --cl->refcount <= 0) {
++		DBG(COL, ul_debugobj(cl, "dealloc"));
++		list_del(&cl->cl_columns);
++		scols_reset_cell(&cl->header);
++		free(cl->color);
++		free(cl);
++	}
++}
++
++/**
++ * scols_copy_column:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Creates a new column and copies @cl's data over to it.
++ *
++ * Returns: a pointer to a new struct libscols_column instance.
++ */
++struct libscols_column *scols_copy_column(const struct libscols_column *cl)
++{
++	struct libscols_column *ret;
++
++	assert (cl);
++	if (!cl)
++		return NULL;
++	ret = scols_new_column();
++	if (!ret)
++		return NULL;
++
++	DBG(COL, ul_debugobj((void *) cl, "copy to %p", ret));
++
++	if (scols_column_set_color(ret, cl->color))
++		goto err;
++	if (scols_cell_copy_content(&ret->header, &cl->header))
++		goto err;
++
++	ret->width	= cl->width;
++	ret->width_min	= cl->width_min;
++	ret->width_max	= cl->width_max;
++	ret->width_avg	= cl->width_avg;
++	ret->width_hint	= cl->width_hint;
++	ret->flags	= cl->flags;
++	ret->is_extreme = cl->is_extreme;
++
++	return ret;
++err:
++	scols_unref_column(ret);
++	return NULL;
++}
++
++/**
++ * scols_column_set_whint:
++ * @cl: a pointer to a struct libscols_column instance
++ * @whint: a width hint
++ *
++ * Sets the width hint of column @cl to @whint.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_column_set_whint(struct libscols_column *cl, double whint)
++{
++	assert(cl);
++
++	if (!cl)
++		return -EINVAL;
++
++	cl->width_hint = whint;
++	return 0;
++}
++
++/**
++ * scols_column_get_whint:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Returns: The width hint of column @cl, a negative value in case of an error.
++ */
++double scols_column_get_whint(struct libscols_column *cl)
++{
++	assert(cl);
++	return cl ? cl->width_hint : -EINVAL;
++}
++
++/**
++ * scols_column_set_flags:
++ * @cl: a pointer to a struct libscols_column instance
++ * @flags: a flag mask
++ *
++ * Sets the flags of @cl to @flags.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_column_set_flags(struct libscols_column *cl, int flags)
++{
++	assert(cl);
++
++	if (!cl)
++		return -EINVAL;
++
++	cl->flags = flags;
++	return 0;
++}
++
++/**
++ * scols_column_get_flags:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Returns: The flag mask of @cl, a negative value in case of an error.
++ */
++int scols_column_get_flags(struct libscols_column *cl)
++{
++	assert(cl);
++	return cl ? cl->flags : -EINVAL;
++}
++
++/**
++ * scols_column_get_header:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Returns: A pointer to a struct libscols_cell instance, representing the
++ * header info of column @cl or NULL in case of an error.
++ */
++struct libscols_cell *scols_column_get_header(struct libscols_column *cl)
++{
++	assert(cl);
++	return cl ? &cl->header : NULL;
++}
++
++/**
++ * scols_column_set_color:
++ * @cl: a pointer to a struct libscols_column instance
++ * @color: ESC sequence
++ *
++ * The default color for data cells and column header.
++ *
++ * If you want to set header specific color then use scols_column_get_header()
++ * and scols_cell_set_color().
++ *
++ * If you want to set data cell specific color the use scols_line_get_cell() +
++ * scols_cell_set_color().
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_column_set_color(struct libscols_column *cl, const char *color)
++{
++	char *p = NULL;
++
++	assert(cl);
++	if (!cl)
++		return -EINVAL;
++	if (color) {
++		p = strdup(color);
++		if (!p)
++			return -ENOMEM;
++	}
++
++	free(cl->color);
++	cl->color = p;
++	return 0;
++}
++
++/**
++ * scols_column_get_color:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Returns: The current color setting of the column @cl.
++ */
++const char *scols_column_get_color(struct libscols_column *cl)
++{
++	assert(cl);
++	return cl ? cl->color : NULL;
++}
++
++
++/**
++ * scols_column_set_cmpfunc:
++ * @cl: column
++ * @cmp: pointer to compare function
++ * @data: private data for cmp function
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_column_set_cmpfunc(struct libscols_column *cl,
++			int (*cmp)(struct libscols_cell *,
++				   struct libscols_cell *,
++				   void *),
++			void *data)
++{
++	assert(cl);
++	if (!cl)
++		return -EINVAL;
++
++	cl->cmpfunc = cmp;
++	cl->cmpfunc_data = data;
++	return 0;
++}
++
++/**
++ * scols_column_is_trunc:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Gets the value of @cl's flag trunc.
++ *
++ * Returns: trunc flag value, negative value in case of an error.
++ */
++int scols_column_is_trunc(struct libscols_column *cl)
++{
++	assert(cl);
++	if (!cl)
++		return -EINVAL;
++	return cl->flags & SCOLS_FL_TRUNC;
++}
++/**
++ * scols_column_is_tree:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Gets the value of @cl's flag tree.
++ *
++ * Returns: tree flag value, negative value in case of an error.
++ */
++int scols_column_is_tree(struct libscols_column *cl)
++{
++	assert(cl);
++	if (!cl)
++		return -EINVAL;
++	return cl->flags & SCOLS_FL_TREE;
++}
++/**
++ * scols_column_is_right:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Gets the value of @cl's flag right.
++ *
++ * Returns: right flag value, negative value in case of an error.
++ */
++int scols_column_is_right(struct libscols_column *cl)
++{
++	assert(cl);
++	if (!cl)
++		return -EINVAL;
++	return cl->flags & SCOLS_FL_RIGHT;
++}
++/**
++ * scols_column_is_strict_width:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Gets the value of @cl's flag strict_width.
++ *
++ * Returns: strict_width flag value, negative value in case of an error.
++ */
++int scols_column_is_strict_width(struct libscols_column *cl)
++{
++	assert(cl);
++	if (!cl)
++		return -EINVAL;
++	return cl->flags & SCOLS_FL_STRICTWIDTH;
++}
++/**
++ * scols_column_is_noextremes:
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Gets the value of @cl's flag no_extremes.
++ *
++ * Returns: no_extremes flag value, negative value in case of an error.
++ */
++int scols_column_is_noextremes(struct libscols_column *cl)
++{
++	assert(cl);
++	if (!cl)
++		return -EINVAL;
++	return cl->flags & SCOLS_FL_NOEXTREMES;
++}
+diff -up util-linux-2.23.2/libsmartcols/src/.gitignore.kzak util-linux-2.23.2/libsmartcols/src/.gitignore
+--- util-linux-2.23.2/libsmartcols/src/.gitignore.kzak	2014-09-25 14:41:48.985843877 +0200
++++ util-linux-2.23.2/libsmartcols/src/.gitignore	2014-09-25 14:41:48.985843877 +0200
+@@ -0,0 +1 @@
++libsmartcols.h
+diff -up util-linux-2.23.2/libsmartcols/src/init.c.kzak util-linux-2.23.2/libsmartcols/src/init.c
+--- util-linux-2.23.2/libsmartcols/src/init.c.kzak	2014-09-25 14:41:48.987843896 +0200
++++ util-linux-2.23.2/libsmartcols/src/init.c	2014-09-25 14:41:48.987843896 +0200
+@@ -0,0 +1,52 @@
++/*
++ * Copyright (C) 2014 Karel Zak <kzak@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++/**
++ * SECTION: init
++ * @title: Library initialization
++ * @short_description: initialize debugging
++ *
++ * The library debug stuff.
++ */
++
++#include <stdarg.h>
++
++#include "smartcolsP.h"
++
++UL_DEBUG_DEFINE_MASK(libsmartcols);
++
++static const struct dbg_mask libsmartcols_masknames [] = {
++	{ "all", SCOLS_DEBUG_ALL },
++	{ "cell", SCOLS_DEBUG_CELL },
++	{ "line", SCOLS_DEBUG_LINE },
++	{ "tab", SCOLS_DEBUG_TAB },
++	{ "col", SCOLS_DEBUG_COL },
++	{ "buff", SCOLS_DEBUG_BUFF },
++	{ NULL, 0 }
++};
++/**
++ * scols_init_debug:
++ * @mask: debug mask (0xffff to enable full debugging)
++ *
++ * If the @mask is not specified, then this function reads
++ * the LIBSMARTCOLS_DEBUG environment variable to get the mask.
++ *
++ * Already initialized debugging stuff cannot be changed. Calling
++ * this function twice has no effect.
++ */
++void scols_init_debug(int mask)
++{
++	__UL_INIT_DEBUG(libsmartcols, SCOLS_DEBUG_, mask, LIBSMARTCOLS_DEBUG);
++
++	if (libsmartcols_debug_mask != SCOLS_DEBUG_INIT) {
++		const char *ver = NULL;
++
++		scols_get_library_version(&ver);
++
++		DBG(INIT, ul_debug("library version: %s", ver));
++	}
++}
+diff -up util-linux-2.23.2/libsmartcols/src/iter.c.kzak util-linux-2.23.2/libsmartcols/src/iter.c
+--- util-linux-2.23.2/libsmartcols/src/iter.c.kzak	2014-09-25 14:41:48.987843896 +0200
++++ util-linux-2.23.2/libsmartcols/src/iter.c	2014-09-25 14:41:48.987843896 +0200
+@@ -0,0 +1,74 @@
++/*
++ * Copyright (C) 2009-2014 Karel Zak <kzak@redhat.com>
++ * Copyright (C) 2014 Ondrej Oprala <ooprala@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++/**
++ * SECTION: iter
++ * @title: Iterator
++ * @short_description: unified iterator
++ *
++ * The iterator keeps the direction and the last position
++ * for access to the internal library tables/lists.
++ */
++
++#include <string.h>
++#include <stdlib.h>
++
++#include "smartcolsP.h"
++
++/**
++ * scols_new_iter:
++ * @direction: SCOLS_INTER_{FOR,BACK}WARD direction
++ *
++ * Returns: newly allocated generic libmount iterator.
++ */
++struct libscols_iter *scols_new_iter(int direction)
++{
++	struct libscols_iter *itr = calloc(1, sizeof(*itr));
++	if (!itr)
++		return NULL;
++	itr->direction = direction;
++	return itr;
++}
++
++/**
++ * scols_free_iter:
++ * @itr: iterator pointer
++ *
++ * Deallocates the iterator.
++ */
++void scols_free_iter(struct libscols_iter *itr)
++{
++	free(itr);
++}
++
++/**
++ * scols_reset_iter:
++ * @itr: iterator pointer
++ * @direction: SCOLS_INTER_{FOR,BACK}WARD or -1 to keep the direction unchanged
++ *
++ * Resets the iterator.
++ */
++void scols_reset_iter(struct libscols_iter *itr, int direction)
++{
++	if (direction == -1)
++		direction = itr->direction;
++
++	memset(itr, 0, sizeof(*itr));
++	itr->direction = direction;
++}
++
++/**
++ * scols_iter_get_direction:
++ * @itr: iterator pointer
++ *
++ * Returns: SCOLS_INTER_{FOR,BACK}WARD
++ */
++int scols_iter_get_direction(struct libscols_iter *itr)
++{
++	return itr->direction;
++}
+diff -up util-linux-2.23.2/libsmartcols/src/libsmartcols.h.in.kzak util-linux-2.23.2/libsmartcols/src/libsmartcols.h.in
+--- util-linux-2.23.2/libsmartcols/src/libsmartcols.h.in.kzak	2014-09-25 14:41:48.988843905 +0200
++++ util-linux-2.23.2/libsmartcols/src/libsmartcols.h.in	2014-09-25 14:41:48.988843905 +0200
+@@ -0,0 +1,229 @@
++/*
++ * Prints table or tree.
++ *
++ * Copyright (C) 2014 Ondrej Oprala <ooprala@redhat.com>
++ * Copyright (C) 2014 Karel Zak <kzak@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++#ifndef _LIBSMARTCOLS_H
++#define _LIBSMARTCOLS_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <sys/types.h>
++
++/**
++ * LIBSMARTCOLS_VERSION:
++ *
++ * Library version string
++ */
++#define LIBSMARTCOLS_VERSION   "@LIBSMARTCOLS_VERSION@"
++
++/**
++ * libscols_iter:
++ *
++ * Generic iterator
++ */
++struct libscols_iter;
++
++/**
++ * libscols_symbols:
++ *
++ * Symbol groups for printing tree hierarchies
++ */
++struct libscols_symbols;
++
++/**
++ * libscols_cell:
++ *
++ * A cell - the smallest library object
++ */
++struct libscols_cell;
++
++/**
++ * libscols_line:
++ *
++ * A line - an array of cells
++ */
++struct libscols_line;
++
++/**
++ * libscols_table:
++ *
++ * A table - The most abstract object, encapsulating lines, columns, symbols and cells
++ */
++struct libscols_table;
++
++/**
++ * libscols_column:
++ *
++ * A column - defines the number of columns and column names
++ */
++struct libscols_column;
++
++/* iter.c */
++enum {
++
++	SCOLS_ITER_FORWARD = 0,
++	SCOLS_ITER_BACKWARD
++};
++
++/*
++ * Column flags
++ */
++enum {
++	SCOLS_FL_TRUNC       = (1 << 0),   /* truncate fields data if necessary */
++	SCOLS_FL_TREE        = (1 << 1),   /* use tree "ascii art" */
++	SCOLS_FL_RIGHT	     = (1 << 2),   /* align to the right */
++	SCOLS_FL_STRICTWIDTH = (1 << 3),   /* don't reduce width if column is empty */
++	SCOLS_FL_NOEXTREMES  = (1 << 4),   /* ignore extreme fields when count column width*/
++};
++
++extern struct libscols_iter *scols_new_iter(int direction);
++extern void scols_free_iter(struct libscols_iter *itr);
++extern void scols_reset_iter(struct libscols_iter *itr, int direction);
++extern int scols_iter_get_direction(struct libscols_iter *itr);
++
++/* init.c */
++extern void scols_init_debug(int mask);
++
++/* version.c */
++extern int scols_parse_version_string(const char *ver_string);
++extern int scols_get_library_version(const char **ver_string);
++
++/* symbols.c */
++extern struct libscols_symbols *scols_new_symbols(void);
++extern void scols_ref_symbols(struct libscols_symbols *sy);
++extern void scols_unref_symbols(struct libscols_symbols *sy);
++extern struct libscols_symbols *scols_copy_symbols(const struct libscols_symbols *sb);
++extern int scols_symbols_set_branch(struct libscols_symbols *sb, const char *str);
++extern int scols_symbols_set_vertical(struct libscols_symbols *sb, const char *str);
++extern int scols_symbols_set_right(struct libscols_symbols *sb, const char *str);
++
++/* cell.c */
++extern int scols_reset_cell(struct libscols_cell *ce);
++extern int scols_cell_copy_content(struct libscols_cell *dest,
++				   const struct libscols_cell *src);
++extern int scols_cell_set_data(struct libscols_cell *ce, const char *str);
++extern int scols_cell_refer_data(struct libscols_cell *ce, char *str);
++extern const char *scols_cell_get_data(const struct libscols_cell *ce);
++extern int scols_cell_set_color(struct libscols_cell *ce, const char *color);
++extern const char *scols_cell_get_color(const struct libscols_cell *ce);
++
++extern void *scols_cell_get_userdata(struct libscols_cell *ce);
++extern int scols_cell_set_userdata(struct libscols_cell *ce, void *data);
++
++extern int scols_cmpstr_cells(struct libscols_cell *a,
++			      struct libscols_cell *b, void *data);
++/* column.c */
++extern int scols_column_is_tree(struct libscols_column *cl);
++extern int scols_column_is_trunc(struct libscols_column *cl);
++extern int scols_column_is_right(struct libscols_column *cl);
++extern int scols_column_is_strict_width(struct libscols_column *cl);
++extern int scols_column_is_noextremes(struct libscols_column *cl);
++
++extern int scols_column_set_flags(struct libscols_column *cl, int flags);
++extern int scols_column_get_flags(struct libscols_column *cl);
++extern struct libscols_column *scols_new_column(void);
++extern void scols_ref_column(struct libscols_column *cl);
++extern void scols_unref_column(struct libscols_column *cl);
++extern struct libscols_column *scols_copy_column(const struct libscols_column *cl);
++extern int scols_column_set_whint(struct libscols_column *cl, double whint);
++extern double scols_column_get_whint(struct libscols_column *cl);
++extern struct libscols_cell *scols_column_get_header(struct libscols_column *cl);
++extern int scols_column_set_color(struct libscols_column *cl, const char *color);
++extern const char *scols_column_get_color(struct libscols_column *cl);
++
++extern int scols_column_set_cmpfunc(struct libscols_column *cl,
++			int (*cmp)(struct libscols_cell *a,
++				   struct libscols_cell *b, void *),
++			void *data);
++
++/* line.c */
++extern struct libscols_line *scols_new_line(void);
++extern void scols_ref_line(struct libscols_line *ln);
++extern void scols_unref_line(struct libscols_line *ln);
++extern int scols_line_alloc_cells(struct libscols_line *ln, size_t n);
++extern void scols_line_free_cells(struct libscols_line *ln);
++extern int scols_line_set_userdata(struct libscols_line *ln, void *data);
++extern void *scols_line_get_userdata(struct libscols_line *ln);
++extern int scols_line_remove_child(struct libscols_line *ln, struct libscols_line *child);
++extern int scols_line_add_child(struct libscols_line *ln, struct libscols_line *child);
++extern int scols_line_has_children(struct libscols_line *ln);
++extern int scols_line_next_child(struct libscols_line *ln,
++			  struct libscols_iter *itr, struct libscols_line **chld);
++extern struct libscols_line *scols_line_get_parent(struct libscols_line *ln);
++extern int scols_line_set_color(struct libscols_line *ln, const char *color);
++extern const char *scols_line_get_color(struct libscols_line *ln);
++extern size_t scols_line_get_ncells(struct libscols_line *ln);
++extern struct libscols_cell *scols_line_get_cell(struct libscols_line *ln, size_t n);
++extern struct libscols_cell *scols_line_get_column_cell(
++		                        struct libscols_line *ln,
++		                        struct libscols_column *cl);
++extern int scols_line_set_data(struct libscols_line *ln, size_t n, const char *data);
++extern int scols_line_refer_data(struct libscols_line *ln, size_t n, char *data);
++extern struct libscols_line *scols_copy_line(struct libscols_line *ln);
++
++/* table */
++extern int scols_table_colors_wanted(struct libscols_table *tb);
++extern int scols_table_is_raw(struct libscols_table *tb);
++extern int scols_table_is_ascii(struct libscols_table *tb);
++extern int scols_table_is_noheadings(struct libscols_table *tb);
++extern int scols_table_is_empty(struct libscols_table *tb);
++extern int scols_table_is_export(struct libscols_table *tb);
++extern int scols_table_is_maxout(struct libscols_table *tb);
++extern int scols_table_is_tree(struct libscols_table *tb);
++
++extern int scols_table_enable_colors(struct libscols_table *tb, int enable);
++extern int scols_table_enable_raw(struct libscols_table *tb, int enable);
++extern int scols_table_enable_ascii(struct libscols_table *tb, int enable);
++extern int scols_table_enable_noheadings(struct libscols_table *tb, int enable);
++extern int scols_table_enable_export(struct libscols_table *tb, int enable);
++extern int scols_table_enable_maxout(struct libscols_table *tb, int enable);
++
++extern int scols_table_set_column_separator(struct libscols_table *tb, const char *sep);
++extern int scols_table_set_line_separator(struct libscols_table *tb, const char *sep);
++
++extern struct libscols_table *scols_new_table(void);
++extern void scols_ref_table(struct libscols_table *tb);
++extern void scols_unref_table(struct libscols_table *tb);
++extern int scols_table_add_column(struct libscols_table *tb, struct libscols_column *cl);
++extern int scols_table_remove_column(struct libscols_table *tb, struct libscols_column *cl);
++extern int scols_table_remove_columns(struct libscols_table *tb);
++extern struct libscols_column *scols_table_new_column(struct libscols_table *tb, const char *name, double whint, int flags);
++extern int scols_table_next_column(struct libscols_table *tb, struct libscols_iter *itr, struct libscols_column **cl);
++extern char *scols_table_get_column_separator(struct libscols_table *tb);
++extern char *scols_table_get_line_separator(struct libscols_table *tb);
++extern int scols_table_get_ncols(struct libscols_table *tb);
++extern int scols_table_get_nlines(struct libscols_table *tb);
++extern struct libscols_column *scols_table_get_column(struct libscols_table *tb, size_t n);
++extern int scols_table_add_line(struct libscols_table *tb, struct libscols_line *ln);
++extern int scols_table_remove_line(struct libscols_table *tb, struct libscols_line *ln);
++extern void scols_table_remove_lines(struct libscols_table *tb);
++extern int scols_table_next_line(struct libscols_table *tb, struct libscols_iter *itr, struct libscols_line **ln);
++extern struct libscols_line *scols_table_new_line(struct libscols_table *tb, struct libscols_line *parent);
++extern struct libscols_line *scols_table_get_line(struct libscols_table *tb, size_t n);
++extern struct libscols_table *scols_copy_table(struct libscols_table *tb);
++extern int scols_table_set_symbols(struct libscols_table *tb, struct libscols_symbols *sy);
++
++extern int scols_table_set_stream(struct libscols_table *tb, FILE *stream);
++extern FILE *scols_table_get_stream(struct libscols_table *tb);
++extern int scols_table_reduce_termwidth(struct libscols_table *tb, size_t reduce);
++
++extern int scols_sort_table(struct libscols_table *tb, struct libscols_column *cl);
++
++/* table_print.c */
++extern int scols_print_table(struct libscols_table *tb);
++extern int scols_print_table_to_string(struct libscols_table *tb, char **data);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _LIBSMARTCOLS_H */
+diff -up util-linux-2.23.2/libsmartcols/src/libsmartcols.sym.kzak util-linux-2.23.2/libsmartcols/src/libsmartcols.sym
+--- util-linux-2.23.2/libsmartcols/src/libsmartcols.sym.kzak	2014-09-25 14:41:48.988843905 +0200
++++ util-linux-2.23.2/libsmartcols/src/libsmartcols.sym	2014-09-25 14:41:48.988843905 +0200
+@@ -0,0 +1,112 @@
++/*
++ * symbols since util-linux 2.25
++ */
++SMARTCOLS_2.25 {
++global:
++	scols_cell_copy_content;
++	scols_cell_get_color;
++	scols_cell_get_data;
++	scols_cell_get_userdata;
++	scols_cell_refer_data;
++	scols_cell_set_color;
++	scols_cell_set_data;
++	scols_cell_set_userdata;
++	scols_cmpstr_cells;
++	scols_column_get_color;
++	scols_column_get_flags;
++	scols_column_get_header;
++	scols_column_get_whint;
++	scols_column_is_noextremes;
++	scols_column_is_right;
++	scols_column_is_strict_width;
++	scols_column_is_tree;
++	scols_column_is_trunc;
++	scols_column_set_cmpfunc;
++	scols_column_set_color;
++	scols_column_set_flags;
++	scols_column_set_whint;
++	scols_copy_column;
++	scols_copy_line;
++	scols_copy_symbols;
++	scols_copy_table;
++	scols_free_iter;
++	scols_get_library_version;
++	scols_init_debug;
++	scols_iter_get_direction;
++	scols_line_add_child;
++	scols_line_alloc_cells;
++	scols_line_free_cells;
++	scols_line_get_cell;
++	scols_line_get_color;
++	scols_line_get_column_cell;
++	scols_line_get_ncells;
++	scols_line_get_parent;
++	scols_line_get_userdata;
++	scols_line_has_children;
++	scols_line_next_child;
++	scols_line_refer_data;
++	scols_line_remove_child;
++	scols_line_set_color;
++	scols_line_set_data;
++	scols_line_set_userdata;
++	scols_new_column;
++	scols_new_iter;
++	scols_new_line;
++	scols_new_symbols;
++	scols_new_table;
++	scols_parse_version_string;
++	scols_print_table;
++	scols_print_table_to_string;
++	scols_ref_column;
++	scols_ref_line;
++	scols_ref_symbols;
++	scols_ref_table;
++	scols_reset_cell;
++	scols_reset_iter;
++	scols_sort_table;
++	scols_symbols_set_branch;
++	scols_symbols_set_right;
++	scols_symbols_set_vertical;
++	scols_table_add_column;
++	scols_table_add_line;
++	scols_table_colors_wanted;
++	scols_table_enable_ascii;
++	scols_table_enable_colors;
++	scols_table_enable_export;
++	scols_table_enable_maxout;
++	scols_table_enable_noheadings;
++	scols_table_enable_raw;
++	scols_table_get_column;
++	scols_table_get_column_separator;
++	scols_table_get_line;
++	scols_table_get_line_separator;
++	scols_table_get_ncols;
++	scols_table_get_nlines;
++	scols_table_get_stream;
++	scols_table_is_ascii;
++	scols_table_is_empty;
++	scols_table_is_export;
++	scols_table_is_maxout;
++	scols_table_is_noheadings;
++	scols_table_is_raw;
++	scols_table_is_tree;
++	scols_table_new_column;
++	scols_table_new_line;
++	scols_table_next_column;
++	scols_table_next_line;
++	scols_table_reduce_termwidth;
++	scols_table_remove_column;
++	scols_table_remove_columns;
++	scols_table_remove_line;
++	scols_table_remove_lines;
++	scols_table_set_column_separator;
++	scols_table_set_line_separator;
++	scols_table_set_stream;
++	scols_table_set_symbols;
++	scols_unref_column;
++	scols_unref_line;
++	scols_unref_symbols;
++	scols_unref_table;
++local:
++	*;
++};
+diff -up util-linux-2.23.2/libsmartcols/src/line.c.kzak util-linux-2.23.2/libsmartcols/src/line.c
+--- util-linux-2.23.2/libsmartcols/src/line.c.kzak	2014-09-25 14:41:48.989843915 +0200
++++ util-linux-2.23.2/libsmartcols/src/line.c	2014-09-25 14:41:48.989843915 +0200
+@@ -0,0 +1,456 @@
++/*
++ * line.c - functions for table handling at the line level
++ *
++ * Copyright (C) 2014 Karel Zak <kzak@redhat.com>
++ * Copyright (C) 2014 Ondrej Oprala <ooprala@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++/**
++ * SECTION: line
++ * @title: Line
++ * @short_description: line API
++ *
++ * An API to access and modify per-line data and information.
++ */
++
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <ctype.h>
++
++#include "smartcolsP.h"
++
++/**
++ * scols_new_line:
++ *
++ * Note that the line is allocated without cells, the cells will be allocated
++ * later when you add the line to the table. If you want to use the line
++ * without table then you have to explicitly allocate the cells by
++ * scols_line_alloc_cells().
++ *
++ * Returns: a pointer to a new struct libscols_line instance.
++ */
++struct libscols_line *scols_new_line(void)
++{
++	struct libscols_line *ln;
++
++	ln = calloc(1, sizeof(*ln));
++	if (!ln)
++		return NULL;
++
++	DBG(LINE, ul_debugobj(ln, "alloc"));
++	ln->refcount = 1;
++	INIT_LIST_HEAD(&ln->ln_lines);
++	INIT_LIST_HEAD(&ln->ln_children);
++	INIT_LIST_HEAD(&ln->ln_branch);
++	return ln;
++}
++
++/**
++ * scols_ref_line:
++ * @ln: a pointer to a struct libscols_line instance
++ *
++ * Increases the refcount of @ln.
++ */
++void scols_ref_line(struct libscols_line *ln)
++{
++	if (ln)
++		ln->refcount++;
++}
++
++/**
++ * scols_unref_line:
++ * @ln: a pointer to a struct libscols_line instance
++ *
++ * Decreases the refcount of @ln. When the count falls to zero, the instance
++ * is automatically deallocated.
++ */
++void scols_unref_line(struct libscols_line *ln)
++{
++
++	if (ln && --ln->refcount <= 0) {
++		DBG(CELL, ul_debugobj(ln, "dealloc"));
++		list_del(&ln->ln_lines);
++		list_del(&ln->ln_children);
++		scols_line_free_cells(ln);
++		free(ln->color);
++		free(ln);
++		return;
++	}
++}
++
++/**
++ * scols_line_free_cells:
++ * @ln: a pointer to a struct libscols_line instance
++ *
++ * Frees the allocated cells referenced to by @ln.
++ */
++void scols_line_free_cells(struct libscols_line *ln)
++{
++	size_t i;
++
++	if (!ln || !ln->cells)
++		return;
++
++	DBG(LINE, ul_debugobj(ln, "free cells"));
++
++	for (i = 0; i < ln->ncells; i++)
++		scols_reset_cell(&ln->cells[i]);
++
++	free(ln->cells);
++	ln->ncells = 0;
++	ln->cells = NULL;
++}
++
++/**
++ * scols_line_alloc_cells:
++ * @ln: a pointer to a struct libscols_line instance
++ * @n: the number of elements
++ *
++ * Allocates space for @n cells. This function is optional,
++ * and libsmartcols automatically allocates necessary cells
++ * according to number of columns in the table when you add
++ * the line to the table. See scols_table_add_line().
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_line_alloc_cells(struct libscols_line *ln, size_t n)
++{
++	struct libscols_cell *ce;
++
++	assert(ln);
++
++	if (!ln)
++		return -EINVAL;
++	if (ln->ncells == n)
++		return 0;
++
++	if (!n) {
++		scols_line_free_cells(ln);
++		return 0;
++	}
++
++	DBG(LINE, ul_debugobj(ln, "alloc %zu cells", n));
++
++	ce = realloc(ln->cells, n * sizeof(struct libscols_cell));
++	if (!ce)
++		return -errno;
++
++	if (n > ln->ncells)
++		memset(ce + ln->ncells, 0,
++		       (n - ln->ncells) * sizeof(struct libscols_cell));
++
++	ln->cells = ce;
++	ln->ncells = n;
++	return 0;
++}
++
++/**
++ * scols_line_set_userdata:
++ * @ln: a pointer to a struct libscols_line instance
++ * @data: user data
++ *
++ * Binds @data to @ln.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_line_set_userdata(struct libscols_line *ln, void *data)
++{
++	assert(ln);
++	if (!ln)
++		return -EINVAL;
++	ln->userdata = data;
++	return 0;
++}
++
++/**
++ * scols_line_get_userdata:
++ * @ln: a pointer to a struct libscols_line instance
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++void *scols_line_get_userdata(struct libscols_line *ln)
++{
++	assert(ln);
++	return ln ? ln->userdata : NULL;
++}
++
++/**
++ * scols_line_remove_child:
++ * @ln: a pointer to a struct libscols_line instance
++ * @child: a pointer to a struct libscols_line instance
++ *
++ * Removes @child as a child of @ln.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_line_remove_child(struct libscols_line *ln, struct libscols_line *child)
++{
++	assert(ln);
++	assert(child);
++
++	if (!ln || !child)
++		return -EINVAL;
++
++	DBG(LINE, ul_debugobj(ln, "remove child %p", child));
++
++	list_del_init(&child->ln_children);
++	child->parent = NULL;
++	scols_unref_line(child);
++
++	scols_unref_line(ln);
++	return 0;
++}
++
++/**
++ * scols_line_add_child:
++ * @ln: a pointer to a struct libscols_line instance
++ * @child: a pointer to a struct libscols_line instance
++ *
++ * Sets @child as a child of @ln.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_line_add_child(struct libscols_line *ln, struct libscols_line *child)
++{
++	assert(ln);
++	assert(child);
++
++	if (!ln || !child)
++		return -EINVAL;
++
++	/* unref old<->parent */
++	if (child->parent)
++		scols_line_remove_child(child->parent, child);
++
++	DBG(LINE, ul_debugobj(ln, "add child %p", child));
++
++	/* new reference from parent to child */
++	list_add_tail(&child->ln_children, &ln->ln_branch);
++	scols_ref_line(child);
++
++	/* new reference from child to parent */
++	child->parent = ln;
++	scols_ref_line(ln);
++
++	return 0;
++}
++
++/**
++ * scols_line_get_parent:
++ * @ln: a pointer to a struct libscols_line instance
++ *
++ * Returns: a pointer to @ln's parent, NULL in case it has no parent or if there was an error.
++ */
++struct libscols_line *scols_line_get_parent(struct libscols_line *ln)
++{
++	assert(ln);
++	return ln ? ln->parent : NULL;
++}
++
++/**
++ * scols_line_has_children:
++ * @ln: a pointer to a struct libscols_line instance
++ *
++ * Returns: 1 if @ln has any children, otherwise 0.
++ */
++int scols_line_has_children(struct libscols_line *ln)
++{
++	assert(ln);
++	return ln ? !list_empty(&ln->ln_branch) : 0;
++}
++
++/**
++ * scols_line_next_child:
++ * @ln: a pointer to a struct libscols_line instance
++ * @itr: a pointer to a struct libscols_iter instance
++ * @chld: a pointer to a pointer to a struct libscols_line instance
++ *
++ * Finds the next child and returns a pointer to it via @chld.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_line_next_child(struct libscols_line *ln,
++			  struct libscols_iter *itr,
++			  struct libscols_line **chld)
++{
++	int rc = 1;
++
++	if (!ln || !itr || !chld)
++		return -EINVAL;
++	*chld = NULL;
++
++	if (!itr->head)
++		SCOLS_ITER_INIT(itr, &ln->ln_branch);
++	if (itr->p != itr->head) {
++		SCOLS_ITER_ITERATE(itr, *chld, struct libscols_line, ln_children);
++		rc = 0;
++	}
++
++	return rc;
++}
++
++/**
++ * scols_line_set_color:
++ * @ln: a pointer to a struct libscols_line instance
++ * @color: ESC sequence
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_line_set_color(struct libscols_line *ln, const char *color)
++{
++	char *p = NULL;
++
++	assert(ln);
++	if (!ln)
++		return -EINVAL;
++	if (color) {
++		p = strdup(color);
++		if (!p)
++			return -ENOMEM;
++	}
++
++	free(ln->color);
++	ln->color = p;
++	return 0;
++}
++
++/**
++ * scols_line_get_color:
++ * @ln: a pointer to a struct libscols_line instance
++ *
++ * Returns: @ln's color string, NULL in case of an error.
++ */
++const char *scols_line_get_color(struct libscols_line *ln)
++{
++	assert(ln);
++	return ln ? ln->color : NULL;
++}
++
++/**
++ * scols_line_get_ncells:
++ * @ln: a pointer to a struct libscols_line instance
++ *
++ * Returns: @ln's number of cells
++ */
++size_t scols_line_get_ncells(struct libscols_line *ln)
++{
++	assert(ln);
++	return ln ? ln->ncells : 0;
++}
++
++/**
++ * scols_line_get_cell:
++ * @ln: a pointer to a struct libscols_line instance
++ * @n: cell number to retrieve
++ *
++ * Returns: the @n-th cell in @ln, NULL in case of an error.
++ */
++struct libscols_cell *scols_line_get_cell(struct libscols_line *ln,
++					  size_t n)
++{
++	assert(ln);
++
++	if (!ln || n >= ln->ncells)
++		return NULL;
++	return &ln->cells[n];
++}
++
++/**
++ * scols_line_get_column_cell:
++ * @ln: a pointer to a struct libscols_line instance
++ * @cl: pointer to cell
++ *
++ * Like scols_line_get_cell() by cell is referenced by column.
++ *
++ * Returns: the @n-th cell in @ln, NULL in case of an error.
++ */
++struct libscols_cell *scols_line_get_column_cell(
++			struct libscols_line *ln,
++			struct libscols_column *cl)
++{
++	assert(ln);
++	assert(cl);
++
++	return scols_line_get_cell(ln, cl->seqnum);
++}
++
++/**
++ * scols_line_set_data:
++ * @ln: a pointer to a struct libscols_cell instance
++ * @n: number of the cell, whose data is to be set
++ * @data: actual data to set
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_line_set_data(struct libscols_line *ln, size_t n, const char *data)
++{
++	struct libscols_cell *ce = scols_line_get_cell(ln, n);
++
++	if (!ce)
++		return -EINVAL;
++	return scols_cell_set_data(ce, data);
++}
++
++/**
++ * scols_line_refer_data:
++ * @ln: a pointer to a struct libscols_cell instance
++ * @n: number of the cell which will refer to @data
++ * @data: actual data to refer to
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_line_refer_data(struct libscols_line *ln, size_t n, char *data)
++{
++	struct libscols_cell *ce = scols_line_get_cell(ln, n);
++
++	if (!ce)
++		return -EINVAL;
++	return scols_cell_refer_data(ce, data);
++}
++
++/**
++ * scols_copy_line:
++ * @ln: a pointer to a struct libscols_cell instance
++ *
++ * Returns: A newly allocated copy of @ln, NULL in case of an error.
++ */
++struct libscols_line *scols_copy_line(struct libscols_line *ln)
++{
++	struct libscols_line *ret;
++	size_t i;
++
++	assert (ln);
++	if (!ln)
++		return NULL;
++
++	ret = scols_new_line();
++	if (!ret)
++		return NULL;
++	if (scols_line_set_color(ret, ln->color))
++		goto err;
++	if (scols_line_alloc_cells(ret, ln->ncells))
++		goto err;
++
++	ret->userdata = ln->userdata;
++	ret->ncells   = ln->ncells;
++	ret->seqnum   = ln->seqnum;
++
++	DBG(LINE, ul_debugobj(ln, "copy to %p", ret));
++
++	for (i = 0; i < ret->ncells; ++i) {
++		if (scols_cell_copy_content(&ret->cells[i], &ln->cells[i]))
++			goto err;
++	}
++
++	return ret;
++err:
++	scols_unref_line(ret);
++	return NULL;
++}
++
++
+diff -up util-linux-2.23.2/libsmartcols/src/Makemodule.am.kzak util-linux-2.23.2/libsmartcols/src/Makemodule.am
+--- util-linux-2.23.2/libsmartcols/src/Makemodule.am.kzak	2014-09-25 14:41:48.985843877 +0200
++++ util-linux-2.23.2/libsmartcols/src/Makemodule.am	2014-09-25 14:42:10.471048869 +0200
+@@ -0,0 +1,75 @@
++
++
++## smartcols.h is generated, so it's stored in builddir! (no distribute in RHEL7)
++#smartcolsincdir = $(includedir)/libsmartcols
++#nodist_smartcolsinc_HEADERS = $(top_builddir)/libsmartcols/src/libsmartcols.h
++
++noinst_LTLIBRARIES += libsmartcols.la
++libsmartcols_la_SOURCES= \
++	include/list.h \
++	\
++	libsmartcols/src/smartcolsP.h \
++	libsmartcols/src/iter.c \
++	libsmartcols/src/symbols.c \
++	libsmartcols/src/cell.c \
++	libsmartcols/src/column.c \
++	libsmartcols/src/line.c \
++	libsmartcols/src/table.c \
++	libsmartcols/src/table_print.c \
++	libsmartcols/src/version.c \
++	libsmartcols/src/init.c \
++	$(nodist_smartcolsinc_HEADERS)
++
++nodist_libsmartcols_la_SOURCES = libsmartcols/src/smartcolsP.h
++
++libsmartcols_la_LIBADD = libcommon.la
++
++libsmartcols_la_CFLAGS = \
++	$(SOLIB_CFLAGS) \
++	-I$(ul_libsmartcols_incdir) \
++	-I$(top_srcdir)/libsmartcols/src
++
++libsmartcols_la_DEPENDENCIES = \
++	libcommon.la \
++	libsmartcols/src/libsmartcols.sym \
++	libsmartcols/src/libsmartcols.h.in
++
++libsmartcols_la_LDFLAGS = \
++	$(SOLIB_LDFLAGS) \
++	-Wl,--version-script=$(top_srcdir)/libsmartcols/src/libsmartcols.sym \
++	-version-info $(LIBSMARTCOLS_VERSION_INFO)
++
++EXTRA_DIST += \
++	libsmartcols/src/libsmartcols.sym \
++	libsmartcols/src/libsmartcols.h.in
++
++
++if BUILD_LIBSMARTCOLS_TESTS
++check_PROGRAMS += test_smartcols
++
++libsmartcols_tests_cflags = $(libsmartcols_la_CFLAGS)
++libsmartcols_tests_ldadd  = libsmartcols.la libcommon.la
++
++test_smartcols_SOURCES = libsmartcols/src/test.c
++test_smartcols_CFLAGS = $(libsmartcols_tests_cflags)
++test_smartcols_LDADD = $(libsmartcols_tests_ldadd)
++endif # BUILD_LIBSMARTCOLS_TESTS
++
++
++# move lib from $(usrlib_execdir) to $(libdir) if needed
++install-exec-hook-libsmartcols:
++	if test "$(usrlib_execdir)" != "$(libdir)" -a -f "$(DESTDIR)$(usrlib_execdir)/libsmartcols.so"; then \
++		mkdir -p $(DESTDIR)$(libdir); \
++		mv $(DESTDIR)$(usrlib_execdir)/libsmartcols.so.* $(DESTDIR)$(libdir); \
++		so_img_name=$$(readlink $(DESTDIR)$(usrlib_execdir)/libsmartcols.so); \
++		so_img_rel_target=$$(echo $(usrlib_execdir) | sed 's,\(^/\|\)[^/][^/]*,..,g'); \
++		(cd $(DESTDIR)$(usrlib_execdir) && \
++			rm -f libsmartcols.so && \
++			$(LN_S) $$so_img_rel_target$(libdir)/$$so_img_name libsmartcols.so); \
++	fi
++
++uninstall-hook-libsmartcols:
++	rm -f $(DESTDIR)$(libdir)/libsmartcols.so*
++
++INSTALL_EXEC_HOOKS += install-exec-hook-libsmartcols
++UNINSTALL_HOOKS += uninstall-hook-libsmartcols
+diff -up util-linux-2.23.2/libsmartcols/src/smartcolsP.h.kzak util-linux-2.23.2/libsmartcols/src/smartcolsP.h
+--- util-linux-2.23.2/libsmartcols/src/smartcolsP.h.kzak	2014-09-25 14:41:48.989843915 +0200
++++ util-linux-2.23.2/libsmartcols/src/smartcolsP.h	2014-09-25 14:41:48.989843915 +0200
+@@ -0,0 +1,173 @@
++/*
++ * smartcolsP.h - private library header file
++ *
++ * Copyright (C) 2014 Ondrej Oprala <ooprala@redhat.com>
++ * Copyright (C) 2014 Karel Zak <kzak@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++#ifndef _LIBSMARTCOLS_PRIVATE_H
++#define _LIBSMARTCOLS_PRIVATE_H
++
++#include "c.h"
++#include "list.h"
++#include "colors.h"
++#include "debug.h"
++
++#include "libsmartcols.h"
++
++/* features */
++#define CONFIG_LIBSMARTCOLS_ASSERT
++
++#ifdef CONFIG_LIBSMARTCOLS_ASSERT
++# include <assert.h>
++#else
++# define assert(x)
++#endif
++
++/*
++ * Debug
++ */
++#define SCOLS_DEBUG_INIT	(1 << 1)
++#define SCOLS_DEBUG_CELL	(1 << 2)
++#define SCOLS_DEBUG_LINE	(1 << 3)
++#define SCOLS_DEBUG_TAB		(1 << 4)
++#define SCOLS_DEBUG_COL		(1 << 5)
++#define SCOLS_DEBUG_BUFF	(1 << 6)
++#define SCOLS_DEBUG_ALL		0xFFFF
++
++UL_DEBUG_DECLARE_MASK(libsmartcols);
++#define DBG(m, x)	__UL_DBG(libsmartcols, SCOLS_DEBUG_, m, x)
++#define ON_DBG(m, x)	__UL_DBG_CALL(libsmartcols, SCOLS_DEBUG_, m, x)
++#define DBG_FLUSH	__UL_DBG_FLUSH(libsmartcols, SCOLS_DEBUG_)
++
++/*
++ * Generic iterator
++ */
++struct libscols_iter {
++	struct list_head        *p;		/* current position */
++	struct list_head        *head;		/* start position */
++	int			direction;	/* SCOLS_ITER_{FOR,BACK}WARD */
++};
++
++/*
++ * Tree symbols
++ */
++struct libscols_symbols {
++	int	refcount;
++	char	*branch;
++	char	*vert;
++	char	*right;
++};
++
++/*
++ * Table cells
++ */
++struct libscols_cell {
++	char	*data;
++	char	*color;
++	void    *userdata;
++};
++
++
++/*
++ * Table column
++ */
++struct libscols_column {
++	int	refcount;	/* reference counter */
++	size_t	seqnum;		/* column index */
++
++	size_t	width;		/* real column width */
++	size_t	width_min;	/* minimal width (usually header width) */
++	size_t  width_max;	/* maximal width */
++	size_t  width_avg;	/* average width, used to detect extreme fields */
++	double	width_hint;	/* hint (N < 1 is in percent of termwidth) */
++
++	int	flags;
++	int	is_extreme;
++	char	*color;		/* default column color */
++
++	int (*cmpfunc)(struct libscols_cell *,
++		       struct libscols_cell *,
++		       void *);			/* cells comparison function */
++	void *cmpfunc_data;
++
++	struct libscols_cell	header;
++	struct list_head	cl_columns;
++};
++
++/*
++ * Table line
++ */
++struct libscols_line {
++	int	refcount;
++	size_t	seqnum;
++
++	void	*userdata;
++	char	*color;		/* default line color */
++
++	struct libscols_cell	*cells;		/* array with data */
++	size_t			ncells;		/* number of cells */
++
++	struct list_head	ln_lines;	/* table lines */
++	struct list_head	ln_branch;	/* begin of branch (head of ln_children) */
++	struct list_head	ln_children;
++
++	struct libscols_line	*parent;
++};
++
++enum {
++	SCOLS_FMT_HUMAN = 0,		/* default, human readable */
++	SCOLS_FMT_RAW,			/* space separated */
++	SCOLS_FMT_EXPORT		/* COLNAME="data" ... */
++};
++
++/*
++ * The table
++ */
++struct libscols_table {
++	int	refcount;
++	size_t	ncols;		/* number of columns */
++	size_t  ntreecols;	/* number of columns with SCOLS_FL_TREE */
++	size_t	nlines;		/* number of lines */
++	size_t	termwidth;	/* terminal width */
++	size_t  termreduce;	/* extra blank space */
++	FILE	*out;		/* output stream */
++
++	char	*colsep;	/* column separator */
++	char	*linesep;	/* line separator */
++
++	struct list_head	tb_columns;
++	struct list_head	tb_lines;
++	struct libscols_symbols	*symbols;
++
++	int	format;		/* SCOLS_FMT_* */
++
++	/* flags */
++	unsigned int	ascii		:1,	/* don't use unicode */
++			colors_wanted	:1,	/* enable colors */
++			is_term		:1,	/* isatty() */
++			maxout		:1,	/* maximalize output */
++			no_headings	:1;	/* don't print header */
++};
++
++#define IS_ITER_FORWARD(_i)	((_i)->direction == SCOLS_ITER_FORWARD)
++#define IS_ITER_BACKWARD(_i)	((_i)->direction == SCOLS_ITER_BACKWARD)
++
++#define SCOLS_ITER_INIT(itr, list) \
++	do { \
++		(itr)->p = IS_ITER_FORWARD(itr) ? \
++				(list)->next : (list)->prev; \
++		(itr)->head = (list); \
++	} while(0)
++
++#define SCOLS_ITER_ITERATE(itr, res, restype, member) \
++	do { \
++		res = list_entry((itr)->p, restype, member); \
++		(itr)->p = IS_ITER_FORWARD(itr) ? \
++				(itr)->p->next : (itr)->p->prev; \
++	} while(0)
++
++#endif /* _LIBSMARTCOLS_PRIVATE_H */
+diff -up util-linux-2.23.2/libsmartcols/src/symbols.c.kzak util-linux-2.23.2/libsmartcols/src/symbols.c
+--- util-linux-2.23.2/libsmartcols/src/symbols.c.kzak	2014-09-25 14:41:48.989843915 +0200
++++ util-linux-2.23.2/libsmartcols/src/symbols.c	2014-09-25 14:41:48.989843915 +0200
+@@ -0,0 +1,175 @@
++/*
++ * symbols.c - routines for symbol handling
++ *
++ * Copyright (C) 2014 Ondrej Oprala <ooprala@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++/**
++ * SECTION: symbols
++ * @title: Symbols
++ * @short_description: symbols API
++ *
++ * An API to access and modify data and information per symbol/symbol group.
++ */
++
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++
++#include "smartcolsP.h"
++
++/**
++ * scols_new_symbols:
++ *
++ * Returns: a pointer to a newly allocated struct libscols_symbols instance.
++ */
++struct libscols_symbols *scols_new_symbols(void)
++{
++	struct libscols_symbols *sy = calloc(1, sizeof(struct libscols_symbols));
++
++	if (!sy)
++		return NULL;
++	sy->refcount = 1;
++	return sy;
++}
++
++/**
++ * scols_ref_symbols:
++ * @sy: a pointer to a struct libscols_symbols instance
++ *
++ * Increases the refcount of @sy.
++ */
++void scols_ref_symbols(struct libscols_symbols *sy)
++{
++	if (sy)
++		sy->refcount++;
++}
++
++/**
++ * scols_unref_symbols:
++ * @sy: a pointer to a struct libscols_symbols instance
++ *
++ * Decreases the refcount of @sy.
++ */
++void scols_unref_symbols(struct libscols_symbols *sy)
++{
++	if (sy && --sy->refcount <= 0) {
++		free(sy->branch);
++		free(sy->vert);
++		free(sy->right);
++		free(sy);
++	}
++}
++
++/**
++ * scols_symbols_set_branch:
++ * @sb: a pointer to a struct libscols_symbols instance
++ * @str: a string which will represent the branch part of a tree output
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_symbols_set_branch(struct libscols_symbols *sb, const char *str)
++{
++	char *p = NULL;
++
++	assert(sb);
++
++	if (!sb)
++		return -EINVAL;
++	if (str) {
++		p = strdup(str);
++		if (!p)
++			return -ENOMEM;
++	}
++	free(sb->branch);
++	sb->branch = p;
++	return 0;
++}
++
++/**
++ * scols_symbols_set_vertical:
++ * @sb: a pointer to a struct libscols_symbols instance
++ * @str: a string which will represent the vertical part of a tree output
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_symbols_set_vertical(struct libscols_symbols *sb, const char *str)
++{
++	char *p = NULL;
++
++	assert(sb);
++
++	if (!sb)
++		return -EINVAL;
++	if (str) {
++		p = strdup(str);
++		if (!p)
++			return -ENOMEM;
++	}
++	free(sb->vert);
++	sb->vert = p;
++	return 0;
++}
++
++/**
++ * scols_symbols_set_right:
++ * @sb: a pointer to a struct libscols_symbols instance
++ * @str: a string which will represent the right part of a tree output
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_symbols_set_right(struct libscols_symbols *sb, const char *str)
++{
++	char *p = NULL;
++
++	assert(sb);
++
++	if (!sb)
++		return -EINVAL;
++	if (str) {
++		p = strdup(str);
++		if (!p)
++			return -ENOMEM;
++	}
++	free(sb->right);
++	sb->right = p;
++	return 0;
++}
++
++/**
++ * scols_copy_symbols:
++ * @sb: a pointer to a struct libscols_symbols instance
++ *
++ * Returns: a newly allocated copy of the @sb symbol group or NULL in caes of an error.
++ */
++struct libscols_symbols *scols_copy_symbols(const struct libscols_symbols *sb)
++{
++	struct libscols_symbols *ret;
++	int rc;
++
++	assert(sb);
++	if (!sb)
++		return NULL;
++
++	ret = scols_new_symbols();
++	if (!ret)
++		return NULL;
++
++	rc = scols_symbols_set_branch(ret, sb->branch);
++	if (!rc)
++		rc = scols_symbols_set_vertical(ret, sb->vert);
++	if (!rc)
++		rc = scols_symbols_set_right(ret, sb->right);
++	if (!rc)
++		return ret;
++
++	scols_unref_symbols(ret);
++	return NULL;
++
++}
++
++
+diff -up util-linux-2.23.2/libsmartcols/src/table.c.kzak util-linux-2.23.2/libsmartcols/src/table.c
+--- util-linux-2.23.2/libsmartcols/src/table.c.kzak	2014-09-25 14:41:48.991843934 +0200
++++ util-linux-2.23.2/libsmartcols/src/table.c	2014-09-25 14:41:48.991843934 +0200
+@@ -0,0 +1,1049 @@
++/*
++ * table.c - functions handling the data at the table level
++ *
++ * Copyright (C) 2010-2014 Karel Zak <kzak@redhat.com>
++ * Copyright (C) 2014 Ondrej Oprala <ooprala@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++/**
++ * SECTION: table
++ * @title: Table
++ * @short_description: table data API
++ *
++ * Table data manipulation API.
++ */
++
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <termios.h>
++#include <ctype.h>
++
++#include "nls.h"
++#include "widechar.h"
++#include "smartcolsP.h"
++
++#ifdef HAVE_WIDECHAR
++#define UTF_V	"\342\224\202"	/* U+2502, Vertical line drawing char */
++#define UTF_VR	"\342\224\234"	/* U+251C, Vertical and right */
++#define UTF_H	"\342\224\200"	/* U+2500, Horizontal */
++#define UTF_UR	"\342\224\224"	/* U+2514, Up and right */
++#endif /* !HAVE_WIDECHAR */
++
++#define is_last_column(_tb, _cl) \
++		list_entry_is_last(&(_cl)->cl_columns, &(_tb)->tb_columns)
++
++
++/**
++ * scols_new_table:
++ *
++ * Returns: A newly allocated table.
++ */
++struct libscols_table *scols_new_table(void)
++{
++	struct libscols_table *tb;
++
++	tb = calloc(1, sizeof(struct libscols_table));
++	if (!tb)
++		return NULL;
++
++	tb->refcount = 1;
++	tb->out = stdout;
++
++	INIT_LIST_HEAD(&tb->tb_lines);
++	INIT_LIST_HEAD(&tb->tb_columns);
++
++	DBG(TAB, ul_debugobj(tb, "alloc"));
++	return tb;
++}
++
++/**
++ * scols_ref_table:
++ * @tb: a pointer to a struct libscols_table instance
++ *
++ * Increases the refcount of @tb.
++ */
++void scols_ref_table(struct libscols_table *tb)
++{
++	if (tb)
++		tb->refcount++;
++}
++
++/**
++ * scols_unref_table:
++ * @tb: a pointer to a struct libscols_table instance
++ *
++ * Decreases the refcount of @tb. When the count falls to zero, the instance
++ * is automatically deallocated.
++ */
++void scols_unref_table(struct libscols_table *tb)
++{
++	if (tb && (--tb->refcount <= 0)) {
++		DBG(TAB, ul_debugobj(tb, "dealloc"));
++		scols_table_remove_lines(tb);
++		scols_table_remove_columns(tb);
++		scols_unref_symbols(tb->symbols);
++		free(tb->linesep);
++		free(tb->colsep);
++		free(tb);
++	}
++}
++
++/**
++ * scols_table_add_column:
++ * @tb: a pointer to a struct libscols_table instance
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Adds @cl to @tb's column list.
++ *
++ * Returns: 0, a negative number in case of an error.
++ */
++int scols_table_add_column(struct libscols_table *tb, struct libscols_column *cl)
++{
++	assert(tb);
++	assert(cl);
++
++	if (!tb || !cl || !list_empty(&tb->tb_lines))
++		return -EINVAL;
++
++	if (cl->flags & SCOLS_FL_TREE)
++		tb->ntreecols++;
++
++	DBG(TAB, ul_debugobj(tb, "add column %p", cl));
++	list_add_tail(&cl->cl_columns, &tb->tb_columns);
++	cl->seqnum = tb->ncols++;
++	scols_ref_column(cl);
++
++	/* TODO:
++	 *
++	 * Currently it's possible to add/remove columns only if the table is
++	 * empty (see list_empty(tb->tb_lines) above). It would be nice to
++	 * enlarge/reduce lines cells[] always when we add/remove a new column.
++	 */
++	return 0;
++}
++
++/**
++ * scols_table_remove_column:
++ * @tb: a pointer to a struct libscols_table instance
++ * @cl: a pointer to a struct libscols_column instance
++ *
++ * Removes @cl from @tb.
++ *
++ * Returns: 0, a negative number in case of an error.
++ */
++int scols_table_remove_column(struct libscols_table *tb,
++			      struct libscols_column *cl)
++{
++	assert(tb);
++	assert(cl);
++
++	if (!tb || !cl || !list_empty(&tb->tb_lines))
++		return -EINVAL;
++
++	if (cl->flags & SCOLS_FL_TREE)
++		tb->ntreecols--;
++
++	DBG(TAB, ul_debugobj(tb, "remove column %p", cl));
++	list_del_init(&cl->cl_columns);
++	tb->ncols--;
++	scols_unref_column(cl);
++	return 0;
++}
++
++/**
++ * scols_table_remove_columns:
++ * @tb: a pointer to a struct libscols_table instance
++ *
++ * Removes all of @tb's columns.
++ *
++ * Returns: 0, a negative number in case of an error.
++ */
++int scols_table_remove_columns(struct libscols_table *tb)
++{
++	assert(tb);
++
++	if (!tb || !list_empty(&tb->tb_lines))
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "remove all columns"));
++	while (!list_empty(&tb->tb_columns)) {
++		struct libscols_column *cl = list_entry(tb->tb_columns.next,
++					struct libscols_column, cl_columns);
++		scols_table_remove_column(tb, cl);
++	}
++	return 0;
++}
++
++
++/**
++ * scols_table_new_column:
++ * @tb: table
++ * @name: column header
++ * @whint: column width hint (absolute width: N > 1; relative width: N < 1)
++ * @flags: flags integer
++ *
++ * This is shortcut for
++ *
++ *   cl = scols_new_column();
++ *   scols_column_set_....(cl, ...);
++ *   scols_table_add_column(tb, cl);
++ *
++ * The column width is possible to define by three ways:
++ *
++ *  @whint = 0..1    : relative width, percent of terminal width
++ *
++ *  @whint = 1..N    : absolute width, empty colum will be truncated to
++ *                     the column header width
++ *
++ *  @whint = 1..N
++ *
++ * The column is necessary to address by
++ * sequential number. The first defined column has the colnum = 0. For example:
++ *
++ *	scols_table_new_column(tab, "FOO", 0.5, 0);		// colnum = 0
++ *	scols_table_new_column(tab, "BAR", 0.5, 0);		// colnum = 1
++ *      .
++ *      .
++ *	scols_line_get_cell(line, 0);				// FOO column
++ *	scols_line_get_cell(line, 1);				// BAR column
++ *
++ * Returns: newly allocated column
++ */
++struct libscols_column *scols_table_new_column(struct libscols_table *tb,
++					       const char *name,
++					       double whint,
++					       int flags)
++{
++	struct libscols_column *cl;
++	struct libscols_cell *hr;
++
++	assert (tb);
++	if (!tb)
++		return NULL;
++
++	DBG(TAB, ul_debugobj(tb, "new column name=%s, whint=%g, flags=%d",
++				name, whint, flags));
++	cl = scols_new_column();
++	if (!cl)
++		return NULL;
++
++	/* set column name */
++	hr = scols_column_get_header(cl);
++	if (!hr)
++		goto err;
++	if (scols_cell_set_data(hr, name))
++		goto err;
++
++	scols_column_set_whint(cl, whint);
++	scols_column_set_flags(cl, flags);
++
++	if (scols_table_add_column(tb, cl))	/* this increments column ref-counter */
++		goto err;
++
++	scols_unref_column(cl);
++	return cl;
++err:
++	scols_unref_column(cl);
++	return NULL;
++}
++
++/**
++ * scols_table_next_column:
++ * @tb: a pointer to a struct libscols_table instance
++ * @itr: a pointer to a struct libscols_iter instance
++ * @cl: a pointer to a pointer to a struct libscols_column instance
++ *
++ * Returns the next column of @tb via @cl.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_table_next_column(struct libscols_table *tb,
++			    struct libscols_iter *itr,
++			    struct libscols_column **cl)
++{
++	int rc = 1;
++
++	if (!tb || !itr || !cl)
++		return -EINVAL;
++	*cl = NULL;
++
++	if (!itr->head)
++		SCOLS_ITER_INIT(itr, &tb->tb_columns);
++	if (itr->p != itr->head) {
++		SCOLS_ITER_ITERATE(itr, *cl, struct libscols_column, cl_columns);
++		rc = 0;
++	}
++
++	return rc;
++}
++
++
++/**
++ * scols_table_get_ncols:
++ * @tb: table
++ *
++ * Returns: the ncols table member, a negative number in case of an error.
++ */
++int scols_table_get_ncols(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb ? tb->ncols : -EINVAL;
++}
++
++/**
++ * scols_table_get_nlines:
++ * @tb: table
++ *
++ * Returns: the nlines table member, a negative number in case of an error.
++ */
++int scols_table_get_nlines(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb ? tb->nlines : -EINVAL;
++}
++
++/**
++ * scols_table_set_stream:
++ * @tb: table
++ * @stream: output stream
++ *
++ * Sets the output stream for table @tb.
++ *
++ * Returns: 0, a negative number in case of an error.
++ */
++int scols_table_set_stream(struct libscols_table *tb, FILE *stream)
++{
++	assert(tb);
++	if (!tb)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "setting alternative stream"));
++	tb->out = stream;
++	return 0;
++}
++
++/**
++ * scols_table_get_stream:
++ * @tb: table
++ *
++ * Gets the output stream for table @tb.
++ *
++ * Returns: stream pointer, NULL in case of an error or an unset stream.
++ */
++FILE *scols_table_get_stream(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb ? tb->out: NULL;
++}
++
++/**
++ * scols_table_reduce_termwidth:
++ * @tb: table
++ * @reduce: width
++ *
++ * Reduce the output width to @reduce.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_table_reduce_termwidth(struct libscols_table *tb, size_t reduce)
++{
++	assert(tb);
++	if (!tb)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "reduce terminal width: %zu", reduce));
++	tb->termreduce = reduce;
++	return 0;
++}
++
++/**
++ * scols_table_get_column:
++ * @tb: table
++ * @n: number of column (0..N)
++ *
++ * Returns: pointer to column or NULL
++ */
++struct libscols_column *scols_table_get_column(struct libscols_table *tb,
++					       size_t n)
++{
++	struct libscols_iter itr;
++	struct libscols_column *cl;
++
++	assert(tb);
++	if (!tb)
++		return NULL;
++	if (n >= tb->ncols)
++		return NULL;
++
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (scols_table_next_column(tb, &itr, &cl) == 0) {
++		if (cl->seqnum == n)
++			return cl;
++	}
++	return NULL;
++}
++
++/**
++ * scols_table_add_line:
++ * @tb: table
++ * @ln: line
++ *
++ * Note that this function calls scols_line_alloc_cells() if number
++ * of the cells in the line is too small for @tb.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_table_add_line(struct libscols_table *tb, struct libscols_line *ln)
++{
++
++	assert(tb);
++	assert(ln);
++
++	if (!tb || !ln)
++		return -EINVAL;
++
++	if (tb->ncols > ln->ncells) {
++		int rc = scols_line_alloc_cells(ln, tb->ncols);
++		if (rc)
++			return rc;
++	}
++
++	DBG(TAB, ul_debugobj(tb, "add line %p", ln));
++	list_add_tail(&ln->ln_lines, &tb->tb_lines);
++	ln->seqnum = tb->nlines++;
++	scols_ref_line(ln);
++	return 0;
++}
++
++/**
++ * scols_table_remove_line:
++ * @tb: table
++ * @ln: line
++ *
++ * Note that this function does not destroy the parent<->child relationship between lines.
++ * You have to call scols_line_remove_child()
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_table_remove_line(struct libscols_table *tb,
++			    struct libscols_line *ln)
++{
++	assert(tb);
++	assert(ln);
++
++	if (!tb || !ln)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "remove line %p", ln));
++	list_del_init(&ln->ln_lines);
++	tb->nlines--;
++	scols_unref_line(ln);
++	return 0;
++}
++
++/**
++ * scols_table_remove_lines:
++ * @tb: table
++ *
++ * This empties the table and also destroys all the parent<->child relationships.
++ */
++void scols_table_remove_lines(struct libscols_table *tb)
++{
++	assert(tb);
++	if (!tb)
++		return;
++
++	DBG(TAB, ul_debugobj(tb, "remove all lines"));
++	while (!list_empty(&tb->tb_lines)) {
++		struct libscols_line *ln = list_entry(tb->tb_lines.next,
++						struct libscols_line, ln_lines);
++		if (ln->parent)
++			scols_line_remove_child(ln->parent, ln);
++		scols_table_remove_line(tb, ln);
++	}
++}
++
++/**
++ * scols_table_next_line:
++ * @tb: a pointer to a struct libscols_table instance
++ * @itr: a pointer to a struct libscols_iter instance
++ * @ln: a pointer to a pointer to a struct libscols_line instance
++ *
++ * Finds the next line and returns a pointer to it via @ln.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_table_next_line(struct libscols_table *tb,
++			  struct libscols_iter *itr,
++			  struct libscols_line **ln)
++{
++	int rc = 1;
++
++	if (!tb || !itr || !ln)
++		return -EINVAL;
++	*ln = NULL;
++
++	if (!itr->head)
++		SCOLS_ITER_INIT(itr, &tb->tb_lines);
++	if (itr->p != itr->head) {
++		SCOLS_ITER_ITERATE(itr, *ln, struct libscols_line, ln_lines);
++		rc = 0;
++	}
++
++	return rc;
++}
++
++/**
++ * scols_table_new_line:
++ * @tb: table
++ * @parent: parental line or NULL
++ *
++ * This is shortcut for
++ *
++ *   ln = scols_new_line();
++ *   scols_table_add_line(tb, ln);
++ *   scols_line_add_child(parent, ln);
++ *
++ *
++ * Returns: newly allocate line
++ */
++struct libscols_line *scols_table_new_line(struct libscols_table *tb,
++					   struct libscols_line *parent)
++{
++	struct libscols_line *ln;
++
++	assert(tb);
++	assert(tb->ncols);
++
++	if (!tb || !tb->ncols)
++		return NULL;
++
++	ln = scols_new_line();
++	if (!ln)
++		return NULL;
++
++	if (scols_table_add_line(tb, ln))
++		goto err;
++	if (parent)
++		scols_line_add_child(parent, ln);
++
++	scols_unref_line(ln);	/* ref-counter incremented by scols_table_add_line() */
++	return ln;
++err:
++	scols_unref_line(ln);
++	return NULL;
++}
++
++/**
++ * scols_table_get_line:
++ * @tb: table
++ * @n: column number (0..N)
++ *
++ * This is a shortcut for
++ *
++ *   ln = scols_new_line();
++ *   scols_line_set_....(cl, ...);
++ *   scols_table_add_line(tb, ln);
++ *
++ * Returns: a newly allocate line
++ */
++struct libscols_line *scols_table_get_line(struct libscols_table *tb,
++					   size_t n)
++{
++	struct libscols_iter itr;
++	struct libscols_line *ln;
++
++	assert(tb);
++	if (!tb)
++		return NULL;
++	if (n >= tb->nlines)
++		return NULL;
++
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (scols_table_next_line(tb, &itr, &ln) == 0) {
++		if (ln->seqnum == n)
++			return ln;
++	}
++	return NULL;
++}
++
++/**
++ * scols_copy_table:
++ * @tb: table
++ *
++ * Creates a new independent table copy, except struct libscols_symbols that
++ * are shared between the tables.
++ *
++ * Returns: a newly allocated copy of @tb
++ */
++struct libscols_table *scols_copy_table(struct libscols_table *tb)
++{
++	struct libscols_table *ret;
++	struct libscols_line *ln;
++	struct libscols_column *cl;
++	struct libscols_iter itr;
++
++	assert(tb);
++	if (!tb)
++		return NULL;
++	ret = scols_new_table();
++	if (!ret)
++		return NULL;
++
++	DBG(TAB, ul_debugobj(tb, "copy into %p", ret));
++
++	if (tb->symbols)
++		scols_table_set_symbols(ret, tb->symbols);
++
++	/* columns */
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (scols_table_next_column(tb, &itr, &cl) == 0) {
++		cl = scols_copy_column(cl);
++		if (!cl)
++			goto err;
++		if (scols_table_add_column(ret, cl))
++			goto err;
++		scols_unref_column(cl);
++	}
++
++	/* lines */
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (scols_table_next_line(tb, &itr, &ln) == 0) {
++		struct libscols_line *newln = scols_copy_line(ln);
++		if (!newln)
++			goto err;
++		if (scols_table_add_line(ret, newln))
++			goto err;
++		if (ln->parent) {
++			struct libscols_line *p =
++				scols_table_get_line(ret, ln->parent->seqnum);
++			if (p)
++				scols_line_add_child(p, newln);
++		}
++		scols_unref_line(newln);
++	}
++
++	/* separators */
++	if (scols_table_set_column_separator(ret, tb->colsep) ||
++	    scols_table_set_line_separator(ret, tb->linesep))
++		goto err;
++
++	return ret;
++err:
++	scols_unref_table(ret);
++	return NULL;
++}
++
++/**
++ * scols_table_set_symbols:
++ * @tb: table
++ * @sy: symbols or NULL
++ *
++ * Add a reference to @sy from the table. The symbols are used by library to
++ * draw tree output. If no symbols are specified then library checks the
++ * current environment to select ASCII or UTF8 symbols. This default behavior
++ * could be controlled by scols_table_enable_ascii().
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_table_set_symbols(struct libscols_table *tb,
++			    struct libscols_symbols *sy)
++{
++	assert(tb);
++
++	if (!tb)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "setting alternative symbols %p", sy));
++
++	if (tb->symbols)				/* unref old */
++		scols_unref_symbols(tb->symbols);
++	if (sy) {					/* ref user defined */
++		tb->symbols = sy;
++		scols_ref_symbols(sy);
++	} else {					/* default symbols */
++		tb->symbols = scols_new_symbols();
++		if (!tb->symbols)
++			return -ENOMEM;
++#if defined(HAVE_WIDECHAR)
++		if (!scols_table_is_ascii(tb) &&
++		    !strcmp(nl_langinfo(CODESET), "UTF-8")) {
++			scols_symbols_set_branch(tb->symbols, UTF_VR UTF_H);
++			scols_symbols_set_vertical(tb->symbols, UTF_V " ");
++			scols_symbols_set_right(tb->symbols, UTF_UR UTF_H);
++		} else
++#endif
++		{
++			scols_symbols_set_branch(tb->symbols, "|-");
++			scols_symbols_set_vertical(tb->symbols, "| ");
++			scols_symbols_set_right(tb->symbols, "`-");
++		}
++	}
++
++	return 0;
++}
++/**
++ * scols_table_enable_colors:
++ * @tb: table
++ * @enable: 1 or 0
++ *
++ * Enable/disable colors.
++ *
++ * Returns: 0 on success, negative number in case of an error.
++ */
++int scols_table_enable_colors(struct libscols_table *tb, int enable)
++{
++	assert(tb);
++	if (!tb)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "colors: %s", enable ? "ENABLE" : "DISABLE"));
++	tb->colors_wanted = enable;
++	return 0;
++}
++/**
++ * scols_table_enable_raw:
++ * @tb: table
++ * @enable: 1 or 0
++ *
++ * Enable/disable raw output format. The parsable output formats
++ * (export and raw) are mutually exclusive.
++ *
++ * Returns: 0 on success, negative number in case of an error.
++ */
++int scols_table_enable_raw(struct libscols_table *tb, int enable)
++{
++	assert(tb);
++	if (!tb)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "raw: %s", enable ? "ENABLE" : "DISABLE"));
++	if (enable)
++		tb->format = SCOLS_FMT_RAW;
++	else if (tb->format == SCOLS_FMT_RAW)
++		tb->format = 0;
++	return 0;
++}
++
++/**
++ * scols_table_enable_export:
++ * @tb: table
++ * @enable: 1 or 0
++ *
++ * Enable/disable export output format (COLUMNAME="value" ...).
++ * The parsable output formats (export and raw) are mutually exclusive.
++ *
++ * Returns: 0 on success, negative number in case of an error.
++ */
++int scols_table_enable_export(struct libscols_table *tb, int enable)
++{
++	assert(tb);
++	if (!tb)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "export: %s", enable ? "ENABLE" : "DISABLE"));
++	if (enable)
++		tb->format = SCOLS_FMT_EXPORT;
++	else if (tb->format == SCOLS_FMT_EXPORT)
++		tb->format = 0;
++	return 0;
++}
++
++/**
++ * scols_table_enable_ascii:
++ * @tb: table
++ * @enable: 1 or 0
++ *
++ * The ASCII-only output is relevant for tree-like outputs. The library
++ * checks if the current environment is UTF8 compatible by default. This
++ * function overrides this check and force the library to use ASCII chars
++ * for the tree.
++ *
++ * If a custom libcols_symbols are specified (see scols_table_set_symbols()
++ * then ASCII flag setting is ignored.
++ *
++ * Returns: 0 on success, negative number in case of an error.
++ */
++int scols_table_enable_ascii(struct libscols_table *tb, int enable)
++{
++	assert(tb);
++	if (!tb)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "ascii: %s", enable ? "ENABLE" : "DISABLE"));
++	tb->ascii = enable ? 1 : 0;
++	return 0;
++}
++
++/**
++ * scols_table_enable_noheadings:
++ * @tb: table
++ * @enable: 1 or 0
++ *
++ * Enable/disable header line.
++ *
++ * Returns: 0 on success, negative number in case of an error.
++ */
++int scols_table_enable_noheadings(struct libscols_table *tb, int enable)
++{
++	assert(tb);
++	if (!tb)
++		return -EINVAL;
++	DBG(TAB, ul_debugobj(tb, "noheading: %s", enable ? "ENABLE" : "DISABLE"));
++	tb->no_headings = enable ? 1 : 0;
++	return 0;
++}
++
++/**
++ * scols_table_enable_maxout:
++ * @tb: table
++ * @enable: 1 or 0
++ *
++ * The extra space after last column is ignored by default. The output
++ * maximization use the extra space for all columns.
++ *
++ * Returns: 0 on success, negative number in case of an error.
++ */
++int scols_table_enable_maxout(struct libscols_table *tb, int enable)
++{
++	assert(tb);
++	if (!tb)
++		return -EINVAL;
++	DBG(TAB, ul_debugobj(tb, "maxout: %s", enable ? "ENABLE" : "DISABLE"));
++	tb->maxout = enable ? 1 : 0;
++	return 0;
++}
++
++/**
++ * scols_table_colors_wanted:
++ * @tb: table
++ *
++ * Returns: 1 if colors are enabled.
++ */
++int scols_table_colors_wanted(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb && tb->colors_wanted;
++}
++
++/**
++ * scols_table_is_empty:
++ * @tb: table
++ *
++ * Returns: 1  if the table is empty.
++ */
++int scols_table_is_empty(struct libscols_table *tb)
++{
++	assert(tb);
++	return !tb || !tb->nlines;
++}
++
++/**
++ * scols_table_is_ascii:
++ * @tb: table
++ *
++ * Returns: 1 if ASCII tree is enabled.
++ */
++int scols_table_is_ascii(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb && tb->ascii;
++}
++
++/**
++ * scols_table_is_noheadings:
++ * @tb: table
++ *
++ * Returns: 1 if header output is disabled.
++ */
++int scols_table_is_noheadings(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb && tb->no_headings;
++}
++
++/**
++ * scols_table_is_export:
++ * @tb: table
++ *
++ * Returns: 1 if export output format is enabled.
++ */
++int scols_table_is_export(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb && tb->format == SCOLS_FMT_EXPORT;
++}
++
++/**
++ * scols_table_is_raw:
++ * @tb: table
++ *
++ * Returns: 1 if raw output format is enabled.
++ */
++int scols_table_is_raw(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb && tb->format == SCOLS_FMT_RAW;
++}
++
++
++/**
++ * scols_table_is_maxout
++ * @tb: table
++ *
++ * Returns: 1 if output maximization is enabled, negative value in case of an error.
++ */
++int scols_table_is_maxout(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb && tb->maxout;
++}
++
++/**
++ * scols_table_is_tree:
++ * @tb: table
++ *
++ * Returns: returns 1 tree-like output is expected.
++ */
++int scols_table_is_tree(struct libscols_table *tb)
++{
++	assert(tb);
++	return tb && tb->ntreecols > 0;
++}
++
++/**
++ * scols_table_set_column_separator:
++ * @tb: table
++ * @sep: separator
++ *
++ * Sets the column separator of @tb to @sep.
++ * Please note that @sep should always take up a single cell in the output.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_table_set_column_separator(struct libscols_table *tb, const char *sep)
++{
++	char *p = NULL;
++
++	assert (tb);
++
++	if (!tb)
++		return -EINVAL;
++
++	if (sep) {
++		p = strdup(sep);
++		if (!p)
++			return -ENOMEM;
++	}
++
++	DBG(TAB, ul_debugobj(tb, "new columns separator: %s", sep));
++	free(tb->colsep);
++	tb->colsep = p;
++	return 0;
++}
++
++/**
++ * scols_table_set_line_separator:
++ * @tb: table
++ * @sep: separator
++ *
++ * Sets the line separator of @tb to @sep.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_table_set_line_separator(struct libscols_table *tb, const char *sep)
++{
++	char *p = NULL;
++
++	assert (tb);
++
++	if (!tb)
++		return -EINVAL;
++
++	if (sep) {
++		p = strdup(sep);
++		if (!p)
++			return -ENOMEM;
++	}
++
++	DBG(TAB, ul_debugobj(tb, "new lines separator: %s", sep));
++	free(tb->linesep);
++	tb->linesep = p;
++	return 0;
++}
++
++/**
++ * scols_table_get_column_separator:
++ * @tb: table
++ *
++ * Returns: @tb column separator, NULL in case of an error
++ */
++char *scols_table_get_column_separator(struct libscols_table *tb)
++{
++	assert (tb);
++
++	if (!tb)
++		return NULL;
++	return tb->colsep;
++}
++
++/**
++ * scols_table_get_line_separator:
++ * @tb: table
++ *
++ * Returns: @tb line separator, NULL in case of an error
++ */
++char *scols_table_get_line_separator(struct libscols_table *tb)
++{
++	assert (tb);
++
++	if (!tb)
++		return NULL;
++	return tb->linesep;
++
++}
++
++static int cells_cmp_wrapper(struct list_head *a, struct list_head *b, void *data)
++{
++	struct libscols_column *cl = (struct libscols_column *) data;
++	struct libscols_line *ra, *rb;
++	struct libscols_cell *ca, *cb;
++
++	assert(a);
++	assert(b);
++	assert(cl);
++
++	ra = list_entry(a, struct libscols_line, ln_lines);
++	rb = list_entry(b, struct libscols_line, ln_lines);
++	ca = scols_line_get_cell(ra, cl->seqnum);
++	cb = scols_line_get_cell(rb, cl->seqnum);
++
++	return cl->cmpfunc(ca, cb, cl->cmpfunc_data);
++}
++
++/**
++ * scols_sort_table:
++ * @tb: table
++ * @cl: order by this column
++ *
++ * Orders the table by the column. See also scols_column_set_cmpfunc().
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_sort_table(struct libscols_table *tb, struct libscols_column *cl)
++{
++	assert(tb);
++	assert(cl);
++
++	if (!tb || !cl)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "sorting table"));
++	list_sort(&tb->tb_lines, cells_cmp_wrapper, cl);
++	return 0;
++}
+diff -up util-linux-2.23.2/libsmartcols/src/table_print.c.kzak util-linux-2.23.2/libsmartcols/src/table_print.c
+--- util-linux-2.23.2/libsmartcols/src/table_print.c.kzak	2014-09-25 14:41:48.992843944 +0200
++++ util-linux-2.23.2/libsmartcols/src/table_print.c	2014-09-25 14:41:48.992843944 +0200
+@@ -0,0 +1,841 @@
++/*
++ * table.c - functions handling the data at the table level
++ *
++ * Copyright (C) 2010-2014 Karel Zak <kzak@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++
++/**
++ * SECTION: table_print
++ * @title: Table print
++ * @short_description: table print API
++ *
++ * Table output API.
++ */
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <termios.h>
++#include <ctype.h>
++
++#include "nls.h"
++#include "mbsalign.h"
++#include "widechar.h"
++#include "ttyutils.h"
++#include "carefulputc.h"
++#include "smartcolsP.h"
++
++/* This is private struct to work with output data */
++struct libscols_buffer {
++	char	*begin;		/* begin of the buffer */
++	char	*cur;		/* current end of  the buffer */
++	char	*encdata;	/* encoded buffer mbs_safe_encode() */
++
++	size_t	bufsz;		/* size of the buffer */
++	size_t	art_idx;	/* begin of the tree ascii art or zero */
++};
++
++static struct libscols_buffer *new_buffer(size_t sz)
++{
++	struct libscols_buffer *buf = malloc(sz + sizeof(struct libscols_buffer));
++
++	if (!buf)
++		return NULL;
++
++	buf->cur = buf->begin = ((char *) buf) + sizeof(struct libscols_buffer);
++	buf->encdata = NULL;
++	buf->bufsz = sz;
++
++	DBG(BUFF, ul_debugobj(buf, "alloc (size=%zu)", sz));
++	return buf;
++}
++
++static void free_buffer(struct libscols_buffer *buf)
++{
++	if (!buf)
++		return;
++	DBG(BUFF, ul_debugobj(buf, "dealloc"));
++	free(buf->encdata);
++	free(buf);
++}
++
++static int buffer_reset_data(struct libscols_buffer *buf)
++{
++	if (!buf)
++		return -EINVAL;
++
++	/*DBG(BUFF, ul_debugobj(buf, "reset data"));*/
++	buf->begin[0] = '\0';
++	buf->cur = buf->begin;
++	buf->art_idx = 0;
++	return 0;
++}
++
++static int buffer_append_data(struct libscols_buffer *buf, const char *str)
++{
++	size_t maxsz, sz;
++
++	if (!buf)
++		return -EINVAL;
++	if (!str || !*str)
++		return 0;
++
++	sz = strlen(str);
++	maxsz = buf->bufsz - (buf->cur - buf->begin);
++
++	if (maxsz <= sz)
++		return -EINVAL;
++
++	memcpy(buf->cur, str, sz + 1);
++	buf->cur += sz;
++	return 0;
++}
++
++static int buffer_set_data(struct libscols_buffer *buf, const char *str)
++{
++	int rc = buffer_reset_data(buf);
++	return rc ? rc : buffer_append_data(buf, str);
++}
++
++/* save the current buffer possition to art_idx */
++static void buffer_set_art_index(struct libscols_buffer *buf)
++{
++	if (buf) {
++		buf->art_idx = buf->cur - buf->begin;
++		/*DBG(BUFF, ul_debugobj(buf, "art index: %zu", buf->art_idx));*/
++	}
++}
++
++static char *buffer_get_data(struct libscols_buffer *buf)
++{
++	return buf ? buf->begin : NULL;
++}
++
++/* encode data by mbs_safe_encode() to avoid control and non-printable chars */
++static char *buffer_get_safe_data(struct libscols_buffer *buf, size_t *cells)
++{
++	char *data = buffer_get_data(buf);
++	char *res = NULL;
++
++	if (!data)
++		goto nothing;
++
++	if (!buf->encdata) {
++		buf->encdata = malloc(mbs_safe_encode_size(buf->bufsz) + 1);
++		if (!buf->encdata)
++			goto nothing;
++	}
++
++	res = mbs_safe_encode_to_buffer(data, cells, buf->encdata);
++	if (!res || !*cells || *cells == (size_t) -1)
++		goto nothing;
++	return res;
++nothing:
++	*cells = 0;
++	return NULL;
++}
++
++/* returns size in bytes of the ascii art (according to art_idx) in safe encoding */
++static size_t buffer_get_safe_art_size(struct libscols_buffer *buf)
++{
++	char *data = buffer_get_data(buf);
++	size_t bytes = 0;
++
++	if (!data || !buf->art_idx)
++		return 0;
++
++	mbs_safe_nwidth(data, buf->art_idx, &bytes);
++	return bytes;
++}
++
++#define is_last_column(_tb, _cl) \
++		list_entry_is_last(&(_cl)->cl_columns, &(_tb)->tb_columns)
++
++#define colsep(tb) ((tb)->colsep ? (tb)->colsep : " ")
++#define linesep(tb) ((tb)->linesep ? (tb)->linesep : "\n")
++
++static int print_data(struct libscols_table *tb,
++		      struct libscols_column *cl,
++		      struct libscols_line *ln,	/* optional */
++		      struct libscols_cell *ce,	/* optional */
++		      struct libscols_buffer *buf)
++{
++	size_t len = 0, i, width, bytes;
++	const char *color = NULL;
++	char *data;
++
++	assert(tb);
++	assert(cl);
++
++	DBG(TAB, ul_debugobj(tb,
++			" -> data, column=%p, line=%p, cell=%p, buff=%p",
++			cl, ln, ce, buf));
++
++	data = buffer_get_data(buf);
++	if (!data)
++		data = "";
++
++	/* raw mode */
++	if (scols_table_is_raw(tb)) {
++		fputs_nonblank(data, tb->out);
++		if (!is_last_column(tb, cl))
++			fputs(colsep(tb), tb->out);
++		return 0;
++	}
++
++	/* NAME=value mode */
++	if (scols_table_is_export(tb)) {
++		fprintf(tb->out, "%s=", scols_cell_get_data(&cl->header));
++		fputs_quoted(data, tb->out);
++		if (!is_last_column(tb, cl))
++			fputs(colsep(tb), tb->out);
++		return 0;
++	}
++
++	if (tb->colors_wanted) {
++		if (ce && !color)
++			color = ce->color;
++		if (ln && !color)
++			color = ln->color;
++		if (!color)
++			color = cl->color;
++	}
++
++	/* encode, note that 'len' and 'width' are number of cells, not bytes */
++	data = buffer_get_safe_data(buf, &len);
++	if (!data)
++		data = "";
++	width = cl->width;
++	bytes = strlen(data);
++
++	if (is_last_column(tb, cl) && len < width && !scols_table_is_maxout(tb))
++		width = len;
++
++	/* truncate data */
++	if (len > width && scols_column_is_trunc(cl)) {
++		len = width;
++		bytes = mbs_truncate(data, &len);	/* updates 'len' */
++
++		if (!data || bytes == (size_t) -1) {
++			bytes = len = 0;
++			data = NULL;
++		}
++	}
++
++	if (data) {
++		if (scols_column_is_right(cl)) {
++			size_t xw = cl->width;
++			if (color)
++				fputs(color, tb->out);
++			fprintf(tb->out, "%*s", (int) xw, data);
++			if (color)
++				fputs(UL_COLOR_RESET, tb->out);
++			if (len < xw)
++				len = xw;
++		} else if (color) {
++			char *p = data;
++			size_t art = buffer_get_safe_art_size(buf);
++
++			/* we don't want to colorize tree ascii art */
++			if (scols_column_is_tree(cl) && art && art < bytes) {
++				fwrite(p, 1, art, tb->out);
++				p += art;
++			}
++
++			fputs(color, tb->out);
++			fputs(p, tb->out);
++			fputs(UL_COLOR_RESET, tb->out);
++		} else
++			fputs(data, tb->out);
++	}
++	for (i = len; i < width; i++)
++		fputs(" ", tb->out);		/* padding */
++
++	if (!is_last_column(tb, cl)) {
++		if (len > width && !scols_column_is_trunc(cl)) {
++			fputs(linesep(tb), tb->out);
++			for (i = 0; i <= (size_t) cl->seqnum; i++) {
++				struct libscols_column *x = scols_table_get_column(tb, i);
++				fprintf(tb->out, "%*s ", -((int)x->width), " ");
++			}
++		} else
++			fputs(colsep(tb), tb->out);	/* columns separator */
++	}
++
++	return 0;
++}
++
++/* returns pointer to the end of used data */
++static int line_ascii_art_to_buffer(struct libscols_table *tb,
++				    struct libscols_line *ln,
++				    struct libscols_buffer *buf)
++{
++	const char *art;
++	int rc;
++
++	assert(ln);
++	assert(buf);
++
++	if (!ln->parent)
++		return 0;
++
++	rc = line_ascii_art_to_buffer(tb, ln->parent, buf);
++	if (rc)
++		return rc;
++
++	if (list_entry_is_last(&ln->ln_children, &ln->parent->ln_branch))
++		art = "  ";
++	else
++		art = tb->symbols->vert;
++
++	return buffer_append_data(buf, art);
++}
++
++static int cell_to_buffer(struct libscols_table *tb,
++			  struct libscols_line *ln,
++			  struct libscols_column *cl,
++			  struct libscols_buffer *buf)
++{
++	const char *data;
++	struct libscols_cell *ce;
++	int rc = 0;
++
++	assert(tb);
++	assert(ln);
++	assert(cl);
++	assert(buf);
++	assert(cl->seqnum <= tb->ncols);
++
++	buffer_reset_data(buf);
++
++	ce = scols_line_get_cell(ln, cl->seqnum);
++	data = ce ? scols_cell_get_data(ce) : NULL;
++	if (!data)
++		return 0;
++
++	if (!scols_column_is_tree(cl))
++		return buffer_set_data(buf, data);
++
++	/*
++	 * Tree stuff
++	 */
++	if (ln->parent) {
++		rc = line_ascii_art_to_buffer(tb, ln->parent, buf);
++
++		if (!rc && list_entry_is_last(&ln->ln_children, &ln->parent->ln_branch))
++			rc = buffer_append_data(buf, tb->symbols->right);
++		else if (!rc)
++			rc = buffer_append_data(buf, tb->symbols->branch);
++		if (!rc)
++			buffer_set_art_index(buf);
++	}
++
++	if (!rc)
++		rc = buffer_append_data(buf, data);
++	return rc;
++}
++
++/*
++ * Prints data, data maybe be printed in more formats (raw, NAME=xxx pairs) and
++ * control and non-printable chars maybe encoded in \x?? hex encoding.
++ */
++static int print_line(struct libscols_table *tb,
++		      struct libscols_line *ln,
++		      struct libscols_buffer *buf)
++{
++	int rc = 0;
++	struct libscols_column *cl;
++	struct libscols_iter itr;
++
++	assert(ln);
++
++	DBG(TAB, ul_debugobj(tb, "printing line, line=%p, buff=%p", ln, buf));
++
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (rc == 0 && scols_table_next_column(tb, &itr, &cl) == 0) {
++		rc = cell_to_buffer(tb, ln, cl, buf);
++		if (!rc)
++			rc = print_data(tb, cl, ln,
++					scols_line_get_cell(ln, cl->seqnum),
++					buf);
++	}
++
++	if (rc == 0)
++		fputs(linesep(tb), tb->out);
++	return 0;
++}
++
++static int print_header(struct libscols_table *tb, struct libscols_buffer *buf)
++{
++	int rc = 0;
++	struct libscols_column *cl;
++	struct libscols_iter itr;
++
++	assert(tb);
++
++	if (scols_table_is_noheadings(tb) ||
++	    scols_table_is_export(tb) ||
++	    list_empty(&tb->tb_lines))
++		return 0;
++
++	DBG(TAB, ul_debugobj(tb, "printing header"));
++
++	/* set width according to the size of data
++	 */
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (rc == 0 && scols_table_next_column(tb, &itr, &cl) == 0) {
++		rc = buffer_set_data(buf, scols_cell_get_data(&cl->header));
++		if (!rc)
++			rc = print_data(tb, cl, NULL, &cl->header, buf);
++	}
++
++	if (rc == 0)
++		fputs(linesep(tb), tb->out);
++	return rc;
++}
++
++static int print_table(struct libscols_table *tb, struct libscols_buffer *buf)
++{
++	int rc;
++	struct libscols_line *ln;
++	struct libscols_iter itr;
++
++	assert(tb);
++
++	rc = print_header(tb, buf);
++
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (rc == 0 && scols_table_next_line(tb, &itr, &ln) == 0)
++		rc = print_line(tb, ln, buf);
++
++	return rc;
++}
++
++static int print_tree_line(struct libscols_table *tb,
++			   struct libscols_line *ln,
++			   struct libscols_buffer *buf)
++{
++	int rc;
++	struct list_head *p;
++
++	rc = print_line(tb, ln, buf);
++	if (rc)
++		return rc;
++	if (list_empty(&ln->ln_branch))
++		return 0;
++
++	/* print all children */
++	list_for_each(p, &ln->ln_branch) {
++		struct libscols_line *chld =
++				list_entry(p, struct libscols_line, ln_children);
++		rc = print_tree_line(tb, chld, buf);
++		if (rc)
++			break;
++	}
++
++	return rc;
++}
++
++static int print_tree(struct libscols_table *tb, struct libscols_buffer *buf)
++{
++	int rc;
++	struct libscols_line *ln;
++	struct libscols_iter itr;
++
++	assert(tb);
++
++	DBG(TAB, ul_debugobj(tb, "printing tree"));
++
++	rc = print_header(tb, buf);
++
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (rc == 0 && scols_table_next_line(tb, &itr, &ln) == 0) {
++		if (ln->parent)
++			continue;
++		rc = print_tree_line(tb, ln, buf);
++	}
++
++	return rc;
++}
++
++static void dbg_column(struct libscols_table *tb, struct libscols_column *cl)
++{
++	DBG(COL, ul_debugobj(cl, "%15s seq=%zu, width=%zd, "
++				 "hint=%d, avg=%zu, max=%zu, min=%zu, "
++				 "extreme=%s",
++
++		cl->header.data, cl->seqnum, cl->width,
++		cl->width_hint > 1 ? (int) cl->width_hint :
++				     (int) (cl->width_hint * tb->termwidth),
++		cl->width_avg,
++		cl->width_max,
++		cl->width_min,
++		cl->is_extreme ? "yes" : "not"));
++}
++
++static void dbg_columns(struct libscols_table *tb)
++{
++	struct libscols_iter itr;
++	struct libscols_column *cl;
++
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (scols_table_next_column(tb, &itr, &cl) == 0)
++		dbg_column(tb, cl);
++}
++
++/*
++ * This function counts column width.
++ *
++ * For the SCOLS_FL_NOEXTREMES columns is possible to call this function two
++ * times.  The first pass counts width and average width. If the column
++ * contains too large fields (width greater than 2 * average) then the column
++ * is marked as "extreme". In the second pass all extreme fields are ignored
++ * and column width is counted from non-extreme fields only.
++ */
++static int count_column_width(struct libscols_table *tb,
++			      struct libscols_column *cl,
++			      struct libscols_buffer *buf)
++{
++	struct libscols_line *ln;
++	struct libscols_iter itr;
++	int count = 0, rc = 0;
++	size_t sum = 0;
++
++	assert(tb);
++	assert(cl);
++
++	cl->width = 0;
++
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (scols_table_next_line(tb, &itr, &ln) == 0) {
++		size_t len;
++		char *data;
++
++		rc = cell_to_buffer(tb, ln, cl, buf);
++		if (rc)
++			return rc;
++
++		data = buffer_get_data(buf);
++		len = data ? mbs_safe_width(data) : 0;
++
++		if (len == (size_t) -1)		/* ignore broken multibyte strings */
++			len = 0;
++		if (len > cl->width_max)
++			cl->width_max = len;
++
++		if (cl->is_extreme && len > cl->width_avg * 2)
++			continue;
++		else if (scols_column_is_noextremes(cl)) {
++			sum += len;
++			count++;
++		}
++		if (len > cl->width)
++			cl->width = len;
++	}
++
++	if (count && cl->width_avg == 0) {
++		cl->width_avg = sum / count;
++
++		if (cl->width_max > cl->width_avg * 2)
++			cl->is_extreme = 1;
++	}
++
++	/* check and set minimal column width */
++	if (scols_cell_get_data(&cl->header))
++		cl->width_min = mbs_safe_width(scols_cell_get_data(&cl->header));
++
++	/* enlarge to minimal width */
++	if (cl->width < cl->width_min && !scols_column_is_strict_width(cl))
++		cl->width = cl->width_min;
++
++	/* use relative size for large columns */
++	else if (cl->width_hint >= 1 && cl->width < (size_t) cl->width_hint
++		 && cl->width_min < (size_t) cl->width_hint)
++
++		cl->width = (size_t) cl->width_hint;
++
++	ON_DBG(COL, dbg_column(tb, cl));
++	return rc;
++}
++
++
++/*
++ * This is core of the scols_* voodo...
++ */
++static int recount_widths(struct libscols_table *tb, struct libscols_buffer *buf)
++{
++	struct libscols_column *cl;
++	struct libscols_iter itr;
++	size_t width = 0;		/* output width */
++	int trunc_only, rc = 0;
++	int extremes = 0;
++
++
++	DBG(TAB, ul_debugobj(tb, "recounting widths (termwidth=%zu)", tb->termwidth));
++
++	/* set basic columns width
++	 */
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (scols_table_next_column(tb, &itr, &cl) == 0) {
++		rc = count_column_width(tb, cl, buf);
++		if (rc)
++			return rc;
++
++		width += cl->width + (is_last_column(tb, cl) ? 0 : 1);
++		extremes += cl->is_extreme;
++	}
++
++	if (!tb->is_term)
++		return 0;
++
++	/* reduce columns with extreme fields
++	 */
++	if (width > tb->termwidth && extremes) {
++		DBG(TAB, ul_debugobj(tb, "   reduce width (extreme columns)"));
++
++		scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++		while (scols_table_next_column(tb, &itr, &cl) == 0) {
++			size_t org_width;
++
++			if (!cl->is_extreme)
++				continue;
++
++			org_width = cl->width;
++			rc = count_column_width(tb, cl, buf);
++			if (rc)
++				return rc;
++
++			if (org_width > cl->width)
++				width -= org_width - cl->width;
++			else
++				extremes--;	/* hmm... nothing reduced */
++		}
++	}
++
++	if (width < tb->termwidth) {
++		if (extremes) {
++			DBG(TAB, ul_debugobj(tb, "   enlarge width (extreme columns)"));
++
++			/* enlarge the first extreme column */
++			scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++			while (scols_table_next_column(tb, &itr, &cl) == 0) {
++				size_t add;
++
++				if (!cl->is_extreme)
++					continue;
++
++				/* this column is tooo large, ignore?
++				if (cl->width_max - cl->width >
++						(tb->termwidth - width))
++					continue;
++				*/
++
++				add = tb->termwidth - width;
++				if (add && cl->width + add > cl->width_max)
++					add = cl->width_max - cl->width;
++
++				cl->width += add;
++				width += add;
++
++				if (width == tb->termwidth)
++					break;
++			}
++		}
++
++		if (width < tb->termwidth && scols_table_is_maxout(tb)) {
++			DBG(TAB, ul_debugobj(tb, "   enlarge width (max-out)"));
++
++			/* try enlarge all columns */
++			while (width < tb->termwidth) {
++				scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++				while (scols_table_next_column(tb, &itr, &cl) == 0) {
++					cl->width++;
++					width++;
++					if (width == tb->termwidth)
++						break;
++				}
++			}
++		} else if (width < tb->termwidth) {
++			/* enlarge the last column */
++			struct libscols_column *cl = list_entry(
++				tb->tb_columns.prev, struct libscols_column, cl_columns);
++
++			DBG(TAB, ul_debugobj(tb, "   enlarge width (last column)"));
++
++			if (!scols_column_is_right(cl) && tb->termwidth - width > 0) {
++				cl->width += tb->termwidth - width;
++				width = tb->termwidth;
++			}
++		}
++	}
++
++	/* bad, we have to reduce output width, this is done in two steps:
++	 * 1/ reduce columns with a relative width and with truncate flag
++	 * 2) reduce columns with a relative width without truncate flag
++	 */
++	trunc_only = 1;
++	while (width > tb->termwidth) {
++		size_t org = width;
++
++		DBG(TAB, ul_debugobj(tb, "   reduce width (current=%zu, "
++					 "wanted=%zu, mode=%s)",
++					width, tb->termwidth,
++					trunc_only ? "trunc-only" : "all-relative"));
++
++		scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++		while (scols_table_next_column(tb, &itr, &cl) == 0) {
++			if (width <= tb->termwidth)
++				break;
++			if (cl->width_hint > 1 && !scols_column_is_trunc(cl))
++				continue;	/* never truncate columns with absolute sizes */
++			if (scols_column_is_tree(cl))
++				continue;	/* never truncate the tree */
++			if (trunc_only && !scols_column_is_trunc(cl))
++				continue;
++			if (cl->width == cl->width_min)
++				continue;
++
++			/* truncate column with relative sizes */
++			if (cl->width_hint < 1 && cl->width > 0 && width > 0 &&
++			    cl->width > cl->width_hint * tb->termwidth) {
++				cl->width--;
++				width--;
++			}
++			/* truncate column with absolute size */
++			if (cl->width_hint > 1 && cl->width > 0 && width > 0 &&
++			    !trunc_only) {
++				cl->width--;
++				width--;
++			}
++
++		}
++		if (org == width) {
++			if (trunc_only)
++				trunc_only = 0;
++			else
++				break;
++		}
++	}
++
++	DBG(TAB, ul_debugobj(tb, "  result: %zu", width));
++	ON_DBG(TAB, dbg_columns(tb));
++
++	return rc;
++}
++
++static size_t strlen_line(struct libscols_line *ln)
++{
++	size_t i, sz = 0;
++
++	assert(ln);
++
++	for (i = 0; i < ln->ncells; i++) {
++		struct libscols_cell *ce = scols_line_get_cell(ln, i);
++		const char *data = ce ? scols_cell_get_data(ce) : NULL;
++
++		sz += data ? strlen(data) : 0;
++	}
++
++	return sz;
++}
++
++
++
++/**
++ * scols_print_table:
++ * @tb: table
++ *
++ * Prints the table to the output stream.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_print_table(struct libscols_table *tb)
++{
++	int rc = 0;
++	size_t bufsz;
++	struct libscols_line *ln;
++	struct libscols_iter itr;
++	struct libscols_buffer *buf;
++
++	assert(tb);
++	if (!tb)
++		return -1;
++
++	DBG(TAB, ul_debugobj(tb, "printing"));
++	if (!tb->symbols)
++		scols_table_set_symbols(tb, NULL);	/* use default */
++
++	tb->is_term = isatty(STDOUT_FILENO) ? 1 : 0;
++	tb->termwidth = tb->is_term ? get_terminal_width() : 0;
++	if (tb->termwidth <= 0)
++		tb->termwidth = 80;
++	tb->termwidth -= tb->termreduce;
++
++	bufsz = tb->termwidth;
++
++	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
++	while (scols_table_next_line(tb, &itr, &ln) == 0) {
++		size_t sz = strlen_line(ln);
++		if (sz > bufsz)
++			bufsz = sz;
++	}
++
++	buf = new_buffer(bufsz + 1);	/* data + space for \0 */
++	if (!buf)
++		return -ENOMEM;
++
++	if (!(scols_table_is_raw(tb) || scols_table_is_export(tb))) {
++		rc = recount_widths(tb, buf);
++		if (rc != 0)
++			goto done;
++	}
++
++	if (scols_table_is_tree(tb))
++		rc = print_tree(tb, buf);
++	else
++		rc = print_table(tb, buf);
++
++done:
++	free_buffer(buf);
++	return rc;
++}
++
++/**
++ * scols_print_table_to_string:
++ * @tb: table
++ * @data: pointer to the beginning of a memory area to print to
++ *
++ * Prints the table to @data.
++ *
++ * Returns: 0, a negative value in case of an error.
++ */
++int scols_print_table_to_string(struct libscols_table *tb, char **data)
++{
++#ifdef HAVE_OPEN_MEMSTREAM
++	FILE *stream;
++	size_t sz;
++	int rc;
++
++	if (!tb)
++		return -EINVAL;
++
++	DBG(TAB, ul_debugobj(tb, "printing to string"));
++
++	/* create a stream for output */
++	stream = open_memstream(data, &sz);
++	if (!stream)
++		return -ENOMEM;
++
++	scols_table_set_stream(tb, stream);
++	rc = scols_print_table(tb);
++	fclose(stream);
++
++	return rc;
++#else
++	return -ENOSYS;
++#endif
++}
++
+diff -up util-linux-2.23.2/libsmartcols/src/test.c.kzak util-linux-2.23.2/libsmartcols/src/test.c
+--- util-linux-2.23.2/libsmartcols/src/test.c.kzak	2014-09-25 14:41:48.993843953 +0200
++++ util-linux-2.23.2/libsmartcols/src/test.c	2014-09-25 14:41:48.993843953 +0200
+@@ -0,0 +1,218 @@
++/*
++ * Copyright (C) 2010-2014 Karel Zak <kzak@redhat.com>
++ *
++ * This file may be redistributed under the terms of the
++ * GNU Lesser General Public License.
++ */
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <errno.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <dirent.h>
++#include <getopt.h>
++
++#include "c.h"
++#include "nls.h"
++#include "strutils.h"
++
++#include "libsmartcols.h"
++
++static int add_children(struct libscols_table *tb,
++			struct libscols_line *ln, int fd);
++
++
++enum { COL_MODE, COL_SIZE, COL_NAME };
++
++/* add columns to the @tb */
++static void setup_columns(struct libscols_table *tb, int notree)
++{
++	if (!scols_table_new_column(tb, "MODE", 0.3, 0))
++		goto fail;
++	if (!scols_table_new_column(tb, "SIZE", 5, SCOLS_FL_RIGHT))
++		goto fail;
++	if (!scols_table_new_column(tb, "NAME", 0.5,
++			(notree ? 0 : SCOLS_FL_TREE) | SCOLS_FL_NOEXTREMES))
++		goto fail;
++
++	return;
++fail:
++	scols_unref_table(tb);
++	err(EXIT_FAILURE, "faild to create output columns");
++}
++
++/* add a new line to @tb, the content is based on @st */
++static int add_line_from_stat(struct libscols_table *tb,
++			      struct libscols_line *parent,
++			      int parent_fd,
++			      struct stat *st,
++			      const char *name)
++{
++	struct libscols_line *ln;
++	char modbuf[11], *p;
++	mode_t mode = st->st_mode;
++	int rc = 0;
++
++	ln = scols_table_new_line(tb, parent);
++	if (!ln)
++		err(EXIT_FAILURE, "failed to create output line");
++
++	/* MODE; local buffer, use scols_line_set_data() that calls strdup() */
++	strmode(mode, modbuf);
++	if (scols_line_set_data(ln, COL_MODE, modbuf))
++		goto fail;
++
++	/* SIZE; already allocated string, use scols_line_refer_data() */
++	p = size_to_human_string(0, st->st_size);
++	if (!p || scols_line_refer_data(ln, COL_SIZE, p))
++		goto fail;
++
++	/* NAME */
++	if (scols_line_set_data(ln, COL_NAME, name))
++		goto fail;
++
++	/* colors */
++	if (scols_table_colors_wanted(tb)) {
++		struct libscols_cell *ce = scols_line_get_cell(ln, COL_NAME);
++
++		if (S_ISDIR(mode))
++			scols_cell_set_color(ce, "blue");
++		else if (S_ISLNK(mode))
++			scols_cell_set_color(ce, "cyan");
++		else if (S_ISBLK(mode))
++			scols_cell_set_color(ce, "magenta");
++		else if ((mode & S_IXOTH) || (mode & S_IXGRP) || (mode & S_IXUSR))
++			scols_cell_set_color(ce, "green");
++	}
++
++	if (S_ISDIR(st->st_mode)) {
++		int fd;
++
++		if (parent_fd >= 0)
++			fd = openat(parent_fd, name, O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC);
++		else
++			fd = open(name, O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC);
++		if (fd >= 0) {
++			rc = add_children(tb, ln, fd);
++			close(fd);
++		}
++	}
++	return rc;
++fail:
++	err(EXIT_FAILURE, "failed to create cell data");
++	return -1;
++}
++
++/* read all entrines from directory addressed by @fd */
++static int add_children(struct libscols_table *tb,
++			struct libscols_line *ln,
++			int fd)
++{
++	DIR *dir;
++	struct dirent *d;
++
++	dir = fdopendir(fd);
++	if (!dir)
++		return -errno;
++
++	while ((d = readdir(dir))) {
++		struct stat st;
++
++		if (strcmp(d->d_name, ".") == 0 || strcmp(d->d_name, "..") == 0)
++			continue;
++		if (fstatat(fd, d->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0)
++			continue;
++		add_line_from_stat(tb, ln, fd, &st, d->d_name);
++	}
++	closedir(dir);
++	return 0;
++}
++
++static void add_lines(struct libscols_table *tb, const char *dirname)
++{
++	struct stat st;
++
++	if (lstat(dirname, &st))
++		err(EXIT_FAILURE, "%s", dirname);
++
++	add_line_from_stat(tb, NULL, -1, &st, dirname);
++}
++
++static void __attribute__((__noreturn__)) usage(FILE *out)
++{
++	fprintf(out, " %s [options] [<dir> ...]\n\n", program_invocation_short_name);
++	fputs(" -c, --csv            display a csv-like output\n", out);
++	fputs(" -i, --ascii          use ascii characters only\n", out);
++	fputs(" -l, --list           use list format output\n", out);
++	fputs(" -n, --noheadings     don't print headings\n", out);
++	fputs(" -p, --pairs          use key=\"value\" output format\n", out);
++	fputs(" -r, --raw            use raw output format\n", out);
++
++	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
++}
++
++int main(int argc, char *argv[])
++{
++	struct libscols_table *tb;
++	int c, notree = 0;
++
++	static const struct option longopts[] = {
++		{ "ascii",	0, 0, 'i' },
++		{ "csv",        0, 0, 'c' },
++		{ "list",       0, 0, 'l' },
++		{ "noheadings",	0, 0, 'n' },
++		{ "pairs",      0, 0, 'p' },
++		{ "raw",      0, 0, 'r' },
++
++		{ NULL, 0, 0, 0 },
++	};
++
++	setlocale(LC_ALL, "");	/* just to have enable UTF8 chars */
++
++	scols_init_debug(0);
++
++	tb = scols_new_table();
++	if (!tb)
++		err(EXIT_FAILURE, "faild to create output table");
++
++	while((c = getopt_long(argc, argv, "cilnpr", longopts, NULL)) != -1) {
++		switch(c) {
++		case 'c':
++			scols_table_set_column_separator(tb, ",");
++			scols_table_enable_raw(tb, 1);
++			notree = 1;
++			break;
++		case 'i':
++			scols_table_enable_ascii(tb, 1);
++			break;
++		case 'l':
++			notree = 1;
++			break;
++		case 'n':
++			scols_table_enable_noheadings(tb, 1);
++			break;
++		case 'p':
++			scols_table_enable_export(tb, 1);
++			notree = 1;
++			break;
++		case 'r':
++			scols_table_enable_raw(tb, 1);
++			notree = 1;
++			break;
++		default:
++			usage(stderr);
++		}
++	}
++
++	scols_table_enable_colors(tb, 1);
++	setup_columns(tb, notree);
++
++	while (optind < argc)
++		add_lines(tb, argv[optind++]);
++
++	scols_print_table(tb);
++	scols_unref_table(tb);
++
++	return EXIT_SUCCESS;
++}
+diff -up util-linux-2.23.2/libsmartcols/src/version.c.kzak util-linux-2.23.2/libsmartcols/src/version.c
+--- util-linux-2.23.2/libsmartcols/src/version.c.kzak	2014-09-25 14:41:48.993843953 +0200
++++ util-linux-2.23.2/libsmartcols/src/version.c	2014-09-25 14:41:48.993843953 +0200
+@@ -0,0 +1,62 @@
++/*
++ * version.c - Return the version of the library
++ *
++ * Copyright (C) 2014 Karel Zak <kzak@redhat.com>
++ *
++ * See COPYING.libmount for the License of this software.
++ */
++
++/**
++ * SECTION: version-utils
++ * @title: Version functions
++ * @short_description: functions to get the library version.
++ *
++ * Note that library version is not the same thing as SONAME version. The
++ * libsmarcols uses symbols versioning and SONAME is not modified for releases.
++ *
++ * The library version and symbols version follow util-linux package versioning.
++ */
++
++#include <ctype.h>
++
++#include "smartcolsP.h"
++
++static const char *lib_version = LIBSMARTCOLS_VERSION;
++
++/**
++ * scols_parse_version_string:
++ * @ver_string: version string (e.g "2.18.0")
++ *
++ * Returns: release version code.
++ */
++int scols_parse_version_string(const char *ver_string)
++{
++	const char *cp;
++	int version = 0;
++
++	assert(ver_string);
++
++	for (cp = ver_string; *cp; cp++) {
++		if (*cp == '.')
++			continue;
++		if (!isdigit(*cp))
++			break;
++		version = (version * 10) + (*cp - '0');
++	}
++	return version;
++}
++
++/**
++ * scols_get_library_version:
++ * @ver_string: return pointer to the static library version string if not NULL
++ *
++ * Returns: release version number.
++ */
++int scols_get_library_version(const char **ver_string)
++{
++	if (ver_string)
++		*ver_string = lib_version;
++
++	return scols_parse_version_string(lib_version);
++}
++
+diff -up util-linux-2.23.2/lib/tt.c.kzak util-linux-2.23.2/lib/tt.c
+--- util-linux-2.23.2/lib/tt.c.kzak	2013-07-15 10:25:46.280049032 +0200
++++ util-linux-2.23.2/lib/tt.c	2014-09-25 14:41:48.982843848 +0200
+@@ -52,140 +52,6 @@ static const struct tt_symbols utf8_tt_s
+ #define is_last_column(_tb, _cl) \
+ 		list_entry_is_last(&(_cl)->cl_columns, &(_tb)->tb_columns)
+ 
+-/*
+- * Counts number of cells in multibyte string. For all control and
+- * non-printable chars is the result width enlarged to store \x?? hex
+- * sequence. See mbs_safe_encode().
+- */
+-static size_t mbs_safe_width(const char *s)
+-{
+-	mbstate_t st;
+-	const char *p = s;
+-	size_t width = 0;
+-
+-	memset(&st, 0, sizeof(st));
+-
+-	while (p && *p) {
+-		if (iscntrl((unsigned char) *p)) {
+-			width += 4;			/* *p encoded to \x?? */
+-			p++;
+-		}
+-#ifdef HAVE_WIDECHAR
+-		else {
+-			wchar_t wc;
+-			size_t len = mbrtowc(&wc, p, MB_CUR_MAX, &st);
+-
+-			if (len == 0)
+-				break;
+-
+-			if (len == (size_t) -1 || len == (size_t) -2) {
+-				len = 1;
+-				width += (isprint((unsigned char) *p) ? 1 : 4);
+-
+-			} if (!iswprint(wc))
+-				width += len * 4;	/* hex encode whole sequence */
+-			else
+-				width += wcwidth(wc);	/* number of cells */
+-			p += len;
+-		}
+-#else
+-		else if (!isprint((unsigned char) *p)) {
+-			width += 4;			/* *p encoded to \x?? */
+-			p++;
+-		} else {
+-			width++;
+-			p++;
+-		}
+-#endif
+-	}
+-
+-	return width;
+-}
+-
+-/*
+- * Returns allocated string where all control and non-printable chars are
+- * replaced with \x?? hex sequence.
+- */
+-static char *mbs_safe_encode(const char *s, size_t *width)
+-{
+-	mbstate_t st;
+-	const char *p = s;
+-	char *res, *r;
+-	size_t sz = s ? strlen(s) : 0;
+-
+-
+-	if (!sz)
+-		return NULL;
+-
+-	memset(&st, 0, sizeof(st));
+-
+-	res = malloc((sz * 4) + 1);
+-	if (!res)
+-		return NULL;
+-
+-	r = res;
+-	*width = 0;
+-
+-	while (p && *p) {
+-		if (iscntrl((unsigned char) *p)) {
+-			sprintf(r, "\\x%02x", (unsigned char) *p);
+-			r += 4;
+-			*width += 4;
+-			p++;
+-		}
+-#ifdef HAVE_WIDECHAR
+-		else {
+-			wchar_t wc;
+-			size_t len = mbrtowc(&wc, p, MB_CUR_MAX, &st);
+-
+-			if (len == 0)
+-				break;		/* end of string */
+-
+-			if (len == (size_t) -1 || len == (size_t) -2) {
+-				len = 1;
+-				/*
+-				 * Not valid multibyte sequence -- maybe it's
+-				 * printable char according to the current locales.
+-				 */
+-				if (!isprint((unsigned char) *p)) {
+-					sprintf(r, "\\x%02x", (unsigned char) *p);
+-					r += 4;
+-					*width += 4;
+-				} else {
+-					width++;
+-					*r++ = *p;
+-				}
+-			} else if (!iswprint(wc)) {
+-				size_t i;
+-				for (i = 0; i < len; i++) {
+-					sprintf(r, "\\x%02x", (unsigned char) *p);
+-					r += 4;
+-					*width += 4;
+-				}
+-			} else {
+-				memcpy(r, p, len);
+-				r += len;
+-				*width += wcwidth(wc);
+-			}
+-			p += len;
+-		}
+-#else
+-		else if (!isprint((unsigned char) *p)) {
+-			sprintf(r, "\\x%02x", (unsigned char) *p);
+-			p++;
+-			r += 4;
+-			*width += 4;
+-		} else {
+-			*r++ = *p++;
+-			*width++;
+-		}
+-#endif
+-	}
+-
+-	*r = '\0';
+-
+-	return res;
+-}
+ 
+ /*
+  * @flags: TT_FL_* flags (usually TT_FL_{ASCII,RAW})
+diff -up util-linux-2.23.2/Makefile.am.kzak util-linux-2.23.2/Makefile.am
+--- util-linux-2.23.2/Makefile.am.kzak	2013-06-13 09:46:10.334649886 +0200
++++ util-linux-2.23.2/Makefile.am	2014-09-25 14:41:48.979843819 +0200
+@@ -22,6 +22,7 @@ dist_noinst_DATA = $(dist_man_MANS)
+ #
+ ul_libblkid_incdir = $(top_builddir)/libblkid/src
+ ul_libmount_incdir = $(top_builddir)/libmount/src
++ul_libsmartcols_incdir = $(top_builddir)/libsmartcols/src
+ ul_libuuid_incdir  = $(top_srcdir)/libuuid/src
+ ul_libfdisk_incdir  = $(top_srcdir)/libfdisk/src
+ 
+@@ -77,6 +78,7 @@ include lib/Makemodule.am
+ include libuuid/Makemodule.am
+ include libblkid/Makemodule.am
+ include libmount/Makemodule.am
++include libsmartcols/Makemodule.am
+ include libfdisk/Makemodule.am
+ 
+ include schedutils/Makemodule.am

@@ -1,0 +1,154 @@
+diff -up util-linux-2.23.2/sys-utils/nsenter.1.kzak util-linux-2.23.2/sys-utils/nsenter.1
+--- util-linux-2.23.2/sys-utils/nsenter.1.kzak	2014-03-12 12:39:19.283577293 +0100
++++ util-linux-2.23.2/sys-utils/nsenter.1	2014-03-12 12:42:08.930336415 +0100
+@@ -47,12 +47,7 @@ flag).
+ will fork by default if changing the PID namespace, so that the new program
+ and its children share the same PID namespace and are visible to each other.
+ If \-\-no\-fork is used, the new program will be exec'ed without forking.
+-.TP
+-.B user namespace
+-process will have distinct set of UIDs, GIDs and capabilities
+-.RB ( CLONE_\:NEWUSER
+-flag).
+-.TP
++.PP
+ See the
+ .BR clone (2)
+ for exact semantics of the flags.
+@@ -88,9 +83,6 @@ the network namespace
+ /proc/\fIpid\fR/ns/pid
+ the PID namespace
+ .TP
+-/proc/\fIpid\fR/ns/user
+-the user namespace
+-.TP
+ /proc/\fIpid\fR/root
+ the root directory
+ .TP
+@@ -124,11 +116,6 @@ Enter the PID namespace.  If no file is
+ the target process.  If file is specified enter the PID namespace specified by
+ file.
+ .TP
+-\fB\-U\fR, \fB\-\-user\fR [\fIfile\fR]
+-Enter the user namespace.  If no file is specified enter the user namespace of
+-the target process.  If file is specified enter the user namespace specified by
+-file.
+-.TP
+ \fB\-r\fR, \fB\-\-root\fR [\fIdirectory\fR]
+ Set the root directory.  If no directory is specified set the root directory to
+ the root directory of the target process.  If directory is specified set the
+diff -up util-linux-2.23.2/sys-utils/nsenter.c.kzak util-linux-2.23.2/sys-utils/nsenter.c
+--- util-linux-2.23.2/sys-utils/nsenter.c.kzak	2014-03-12 12:39:10.402485179 +0100
++++ util-linux-2.23.2/sys-utils/nsenter.c	2014-03-12 12:44:07.986570461 +0100
+@@ -42,12 +42,7 @@ static struct namespace_file {
+ 	int fd;
+ } namespace_files[] = {
+ 	/* Careful the order is significant in this array.
+-	 *
+-	 * The user namespace comes first, so that it is entered
+-	 * first.  This gives an unprivileged user the potential to
+-	 * enter the other namespaces.
+ 	 */
+-	{ .nstype = CLONE_NEWUSER, .name = "ns/user", .fd = -1 },
+ 	{ .nstype = CLONE_NEWIPC,  .name = "ns/ipc",  .fd = -1 },
+ 	{ .nstype = CLONE_NEWUTS,  .name = "ns/uts",  .fd = -1 },
+ 	{ .nstype = CLONE_NEWNET,  .name = "ns/net",  .fd = -1 },
+@@ -71,7 +66,6 @@ static void usage(int status)
+ 	fputs(_(" -i, --ipc   [=<file>]  enter System V IPC namespace\n"), out);
+ 	fputs(_(" -n, --net   [=<file>]  enter network namespace\n"), out);
+ 	fputs(_(" -p, --pid   [=<file>]  enter pid namespace\n"), out);
+-	fputs(_(" -U, --user  [=<file>]  enter user namespace\n"), out);
+ 	fputs(_(" -r, --root  [=<dir>]   set the root directory\n"), out);
+ 	fputs(_(" -w, --wd    [=<dir>]   set the working directory\n"), out);
+ 	fputs(_(" -F, --no-fork          do not fork before exec'ing <program>\n"), out);
+@@ -168,7 +162,6 @@ int main(int argc, char *argv[])
+ 		{ "ipc", optional_argument, NULL, 'i' },
+ 		{ "net", optional_argument, NULL, 'n' },
+ 		{ "pid", optional_argument, NULL, 'p' },
+-		{ "user", optional_argument, NULL, 'U' },
+ 		{ "root", optional_argument, NULL, 'r' },
+ 		{ "wd", optional_argument, NULL, 'w' },
+ 		{ "no-fork", no_argument, NULL, 'F' },
+@@ -186,7 +179,7 @@ int main(int argc, char *argv[])
+ 	atexit(close_stdout);
+ 
+ 	while ((c =
+-		getopt_long(argc, argv, "hVt:m::u::i::n::p::U::r::w::F",
++		getopt_long(argc, argv, "hVt:m::u::i::n::p::r::w::F",
+ 			    longopts, NULL)) != -1) {
+ 		switch (c) {
+ 		case 'h':
+@@ -228,12 +221,6 @@ int main(int argc, char *argv[])
+ 			else
+ 				namespaces |= CLONE_NEWPID;
+ 			break;
+-		case 'U':
+-			if (optarg)
+-				open_namespace_fd(CLONE_NEWUSER, optarg);
+-			else
+-				namespaces |= CLONE_NEWUSER;
+-			break;
+ 		case 'F':
+ 			do_fork = 0;
+ 			break;
+diff -up util-linux-2.23.2/sys-utils/unshare.1.kzak util-linux-2.23.2/sys-utils/unshare.1
+--- util-linux-2.23.2/sys-utils/unshare.1.kzak	2014-03-12 12:39:41.367806340 +0100
++++ util-linux-2.23.2/sys-utils/unshare.1	2014-03-12 12:40:25.186260760 +0100
+@@ -34,9 +34,6 @@ etc. (\fBCLONE_NEWNET\fP flag).
+ .BR "pid namespace"
+ children will have a distinct set of pid to process mappings than their parent.
+ (\fBCLONE_NEWPID\fP flag).
+-.TP
+-.BR "user namespace"
+-process will have distinct set of uids, gids and capabilities. (\fBCLONE_NEWUSER\fP flag).
+ .PP
+ See the \fBclone\fR(2) for exact semantics of the flags.
+ .SH OPTIONS
+@@ -58,9 +55,6 @@ Unshare the network namespace.
+ .TP
+ .BR \-p , " \-\-pid"
+ Unshare the pid namespace.
+-.TP
+-.BR \-U , " \-\-user"
+-Unshare the user namespace.
+ .SH SEE ALSO
+ .BR unshare (2),
+ .BR clone (2)
+diff -up util-linux-2.23.2/sys-utils/unshare.c.kzak util-linux-2.23.2/sys-utils/unshare.c
+--- util-linux-2.23.2/sys-utils/unshare.c.kzak	2014-03-12 12:39:46.385858383 +0100
++++ util-linux-2.23.2/sys-utils/unshare.c	2014-03-12 12:44:49.955005384 +0100
+@@ -45,7 +45,6 @@ static void usage(int status)
+ 	fputs(_(" -i, --ipc         unshare System V IPC namespace\n"), out);
+ 	fputs(_(" -n, --net         unshare network namespace\n"), out);
+ 	fputs(_(" -p, --pid         unshare pid namespace\n"), out);
+-	fputs(_(" -U, --user        unshare user namespace\n"), out);
+ 
+ 	fputs(USAGE_SEPARATOR, out);
+ 	fputs(USAGE_HELP, out);
+@@ -65,7 +64,6 @@ int main(int argc, char *argv[])
+ 		{ "ipc", no_argument, 0, 'i' },
+ 		{ "net", no_argument, 0, 'n' },
+ 		{ "pid", no_argument, 0, 'p' },
+-		{ "user", no_argument, 0, 'U' },
+ 		{ NULL, 0, 0, 0 }
+ 	};
+ 
+@@ -78,7 +76,7 @@ int main(int argc, char *argv[])
+ 	textdomain(PACKAGE);
+ 	atexit(close_stdout);
+ 
+-	while ((c = getopt_long(argc, argv, "hVmuinpU", longopts, NULL)) != -1) {
++	while ((c = getopt_long(argc, argv, "hVmuinp", longopts, NULL)) != -1) {
+ 		switch (c) {
+ 		case 'h':
+ 			usage(EXIT_SUCCESS);
+@@ -100,9 +98,6 @@ int main(int argc, char *argv[])
+ 		case 'p':
+ 			unshare_flags |= CLONE_NEWPID;
+ 			break;
+-		case 'U':
+-			unshare_flags |= CLONE_NEWUSER;
+-			break;
+ 		default:
+ 			usage(EXIT_FAILURE);
+ 		}

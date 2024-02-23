@@ -1,0 +1,64 @@
+From 756f8301d5f7959312bea3fa8865bb543d43fd50 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Wed, 8 Feb 2017 10:19:56 +0100
+Subject: [PATCH] su: properly clear child PID
+
+Upstream: http://github.com/karelzak/util-linux/commit/dffab154d29a288aa171ff50263ecc8f2e14a891
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1419474
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ login-utils/su-common.c | 25 +++++++++++++++----------
+ 1 file changed, 15 insertions(+), 10 deletions(-)
+
+diff --git a/login-utils/su-common.c b/login-utils/su-common.c
+index d53d690..9b3cad5 100644
+--- a/login-utils/su-common.c
++++ b/login-utils/su-common.c
+@@ -357,21 +357,26 @@ create_watching_parent (void)
+ 	    break;
+ 	}
+       if (pid != (pid_t)-1)
+-	if (WIFSIGNALED (status))
+-	  {
+-            fprintf (stderr, "%s%s\n", strsignal (WTERMSIG (status)),
+-                     WCOREDUMP (status) ? _(" (core dumped)") : "");
+-            status = WTERMSIG (status) + 128;
+-	  }
+-	else
+-	  status = WEXITSTATUS (status);
++	{
++	  if (WIFSIGNALED (status))
++	    {
++	      fprintf (stderr, "%s%s\n", strsignal (WTERMSIG (status)),
++                       WCOREDUMP (status) ? _(" (core dumped)") : "");
++	      status = WTERMSIG (status) + 128;
++	    }
++	  else
++	    status = WEXITSTATUS (status);
++
++          /* child is gone, don't use the PID anymore */
++          child = (pid_t) -1;
++	}
+       else
+ 	status = 1;
+     }
+   else
+     status = 1;
+ 
+-  if (caught_signal)
++  if (caught_signal && child != (pid_t)-1)
+     {
+       fprintf (stderr, _("\nSession terminated, killing shell..."));
+       kill (child, SIGTERM);
+@@ -379,7 +384,7 @@ create_watching_parent (void)
+ 
+   cleanup_pam (PAM_SUCCESS);
+ 
+-  if (caught_signal)
++  if (caught_signal && (child != (pid_t)-1))
+     {
+       sleep (2);
+       kill (child, SIGKILL);
+-- 
+2.7.4
+

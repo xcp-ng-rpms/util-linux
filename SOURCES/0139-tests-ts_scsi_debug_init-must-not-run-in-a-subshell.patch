@@ -1,0 +1,558 @@
+From 9e643d190c1c3b39423c4d00f1ddc89e2b4cc09e Mon Sep 17 00:00:00 2001
+From: Ruediger Meier <ruediger.meier@ga-group.nl>
+Date: Sun, 11 May 2014 08:50:28 +0200
+Subject: [PATCH 139/141] tests: ts_scsi_debug_init must not run in a subshell
+
+ts_skip and ts_die won't work from subshell. Now we simply use
+TS_DEVICE which is globally set in that function.
+
+I've made sure that we never change TS_DEVICE variable after
+we've got it. So we could use it again for cleanup on exit in
+ts_{finalize,die,skip} functions.
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1454652
+Upstream: http://github.com/karelzak/util-linux/commit/f45df374ffc311220bd395da985b121eccfb4045
+Signed-off-by: Karel Zak <kzak@redhat.com>
+Signed-off-by: Ruediger Meier <ruediger.meier@ga-group.nl>
+---
+ tests/ts/blkid/md-raid1-part          | 25 +++++++++++++++-------
+ tests/ts/eject/umount                 | 39 ++++++++++++++++++-----------------
+ tests/ts/fdisk/align-512-4K           |  9 ++++----
+ tests/ts/fdisk/align-512-4K-63        |  9 ++++----
+ tests/ts/fdisk/align-512-4K-md        | 12 ++++++-----
+ tests/ts/fdisk/align-512-512-topology | 10 ++++-----
+ tests/ts/libmount/context             |  9 ++++----
+ tests/ts/libmount/context-utab        |  9 ++++----
+ tests/ts/libmount/tabfiles-tags       | 15 +++++++-------
+ tests/ts/mount/umount-alltargets      | 29 +++++++++++++-------------
+ tests/ts/mount/umount-recursive       | 21 ++++++++++---------
+ 11 files changed, 104 insertions(+), 83 deletions(-)
+
+diff --git a/tests/ts/blkid/md-raid1-part b/tests/ts/blkid/md-raid1-part
+index 46bde0ec8..20612ec21 100755
+--- a/tests/ts/blkid/md-raid1-part
++++ b/tests/ts/blkid/md-raid1-part
+@@ -23,10 +23,11 @@ TS_DESC="MD raid1 (last partition)"
+ ts_init "$*"
+ ts_skip_nonroot
+ 
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=51 sector_size=512)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=51 sector_size=512
+ 
+ ts_log "Create partitions"
+-$TS_CMD_FDISK ${DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
++$TS_CMD_FDISK ${TS_DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
+ n
+ p
+ 1
+@@ -42,6 +43,16 @@ w
+ q
+ EOF
+ 
++# replace generated ID with something stable
++$TS_CMD_FDISK ${TS_DEVICE} &> /dev/null <<EOF
++x
++i
++0x1
++r
++w
++q
++EOF
++
+ udevadm settle
+ MD_DEVNAME=md8
+ MD_DEVICE=/dev/${MD_DEVNAME}
+@@ -49,24 +60,24 @@ MD_DEVICE=/dev/${MD_DEVNAME}
+ ts_log "Create RAID1 device"
+ /sbin/mdadm -q -S ${MD_DEVICE} &> /dev/null
+ /sbin/mdadm -q --create ${MD_DEVICE} --metadata=0.90 --chunk=64 --level=1 \
+-	    --raid-devices=2 ${DEVICE}1 ${DEVICE}2 >> $TS_OUTPUT 2>&1
++	    --raid-devices=2 ${TS_DEVICE}1 ${TS_DEVICE}2 >> $TS_OUTPUT 2>&1
+ udevadm settle
+ 
+ ts_log "Probe whole-disk"
+-$TS_CMD_BLKID -p -o udev ${DEVICE} 2>&1 | sort >> $TS_OUTPUT
++$TS_CMD_BLKID -p -o udev ${TS_DEVICE} 2>&1 | sort >> $TS_OUTPUT
+ 
+ ts_log "Probe first RAID member"
+-$TS_CMD_BLKID -p -o udev ${DEVICE}1 2>&1 | sort >> $TS_OUTPUT
++$TS_CMD_BLKID -p -o udev ${TS_DEVICE}1 2>&1 | sort >> $TS_OUTPUT
+ 
+ ts_log "Probe second RAID member"
+-$TS_CMD_BLKID -p -o udev ${DEVICE}2 2>&1 | sort >> $TS_OUTPUT
++$TS_CMD_BLKID -p -o udev ${TS_DEVICE}2 2>&1 | sort >> $TS_OUTPUT
+ 
+ /sbin/mdadm -q -S ${MD_DEVICE} >> $TS_OUTPUT 2>&1
+ 
+ udevadm settle
+ rmmod scsi_debug
+ 
+-ts_fdisk_clean $DEVICE
++ts_fdisk_clean $TS_DEVICE
+ # substitue UUIDs and major/minor number before comparison
+ sed -i \
+   -e         's/^\(ID_FS_UUID\)=.*/\1=__ts_uuid__/' \
+diff --git a/tests/ts/eject/umount b/tests/ts/eject/umount
+index 3c1f84edf..994ddb483 100755
+--- a/tests/ts/eject/umount
++++ b/tests/ts/eject/umount
+@@ -12,6 +12,7 @@ ts_skip_nonroot
+ # not removable device.
+ #
+ 
++# set global variable TS_DEVICE
+ function init_device {
+ 	ts_scsi_debug_init dev_size_mb=100
+ }
+@@ -47,50 +48,50 @@ function deinit_device {
+ 
+ 
+ ts_init_subtest "by-disk"
+-DEVICE=$(init_device)
+-$TS_CMD_EJECT --force $DEVICE && ts_log "Success"
++init_device
++$TS_CMD_EJECT --force $TS_DEVICE && ts_log "Success"
+ deinit_device
+ ts_finalize_subtest
+ 
+ ts_init_subtest "by-disk-mounted"
+-DEVICE=$(init_device)
+-mkfs.ext2 -q -F $DEVICE
++init_device
++mkfs.ext2 -q -F $TS_DEVICE
+ udevadm settle
+ mkdir -p $TS_MOUNTPOINT
+-mount $DEVICE $TS_MOUNTPOINT
+-$TS_CMD_EJECT --force $DEVICE && ts_log "Success"
++mount $TS_DEVICE $TS_MOUNTPOINT
++$TS_CMD_EJECT --force $TS_DEVICE && ts_log "Success"
+ deinit_device
+ ts_finalize_subtest
+ 
+ 
+ ts_init_subtest "by-disk-mounted-partition"
+-DEVICE=$(init_device)
+-init_partitions $DEVICE
++init_device
++init_partitions $TS_DEVICE
+ mkdir -p ${TS_MOUNTPOINT}1
+ mkdir -p ${TS_MOUNTPOINT}2
+-mount ${DEVICE}1 ${TS_MOUNTPOINT}1
+-mount ${DEVICE}2 ${TS_MOUNTPOINT}2
+-$TS_CMD_EJECT --force $DEVICE && ts_log "Success"
++mount ${TS_DEVICE}1 ${TS_MOUNTPOINT}1
++mount ${TS_DEVICE}2 ${TS_MOUNTPOINT}2
++$TS_CMD_EJECT --force $TS_DEVICE && ts_log "Success"
+ deinit_device
+ ts_finalize_subtest
+ 
+ 
+ ts_init_subtest "by-partition"
+-DEVICE=$(init_device)
+-init_partitions $DEVICE
+-$TS_CMD_EJECT --force ${DEVICE}1 && ts_log "Success"
++init_device
++init_partitions $TS_DEVICE
++$TS_CMD_EJECT --force ${TS_DEVICE}1 && ts_log "Success"
+ deinit_device
+ ts_finalize_subtest
+ 
+ 
+ ts_init_subtest "by-partition-mounted"
+-DEVICE=$(init_device)
+-init_partitions $DEVICE
++init_device
++init_partitions $TS_DEVICE
+ mkdir -p ${TS_MOUNTPOINT}1
+ mkdir -p ${TS_MOUNTPOINT}2
+-mount ${DEVICE}1 ${TS_MOUNTPOINT}1
+-mount ${DEVICE}2 ${TS_MOUNTPOINT}2
+-$TS_CMD_EJECT --force ${DEVICE}1 && ts_log "Success"
++mount ${TS_DEVICE}1 ${TS_MOUNTPOINT}1
++mount ${TS_DEVICE}2 ${TS_MOUNTPOINT}2
++$TS_CMD_EJECT --force ${TS_DEVICE}1 && ts_log "Success"
+ deinit_device
+ ts_finalize_subtest
+ 
+diff --git a/tests/ts/fdisk/align-512-4K b/tests/ts/fdisk/align-512-4K
+index c5ea72e7a..5608b1b65 100755
+--- a/tests/ts/fdisk/align-512-4K
++++ b/tests/ts/fdisk/align-512-4K
+@@ -27,11 +27,12 @@ TS_DESC="align 512/4K"
+ ts_init "$*"
+ ts_skip_nonroot
+ 
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=50 sector_size=512 physblk_exp=3)
+-DEVNAME=$(basename $DEVICE)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=50 sector_size=512 physblk_exp=3
++DEVNAME=$(basename $TS_DEVICE)
+ 
+ ts_log "Create partitions"
+-$TS_CMD_FDISK ${DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
++$TS_CMD_FDISK ${TS_DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
+ n
+ p
+ 1
+@@ -71,6 +72,6 @@ cat /sys/block/${DEVNAME}/${DEVNAME}{1,2,3,4,5,6,7}/alignment_offset >> $TS_OUTP
+ 
+ rmmod scsi_debug
+ 
+-ts_fdisk_clean $DEVICE
++ts_fdisk_clean $TS_DEVICE
+ 
+ ts_finalize
+diff --git a/tests/ts/fdisk/align-512-4K-63 b/tests/ts/fdisk/align-512-4K-63
+index 4ec81982f..8199cf7b3 100755
+--- a/tests/ts/fdisk/align-512-4K-63
++++ b/tests/ts/fdisk/align-512-4K-63
+@@ -27,11 +27,12 @@ TS_DESC="align 512/4K +alignment_offset"
+ ts_init "$*"
+ ts_skip_nonroot
+ 
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=50 sector_size=512 physblk_exp=3 lowest_aligned=7)
+-DEVNAME=$(basename $DEVICE)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=50 sector_size=512 physblk_exp=3 lowest_aligned=7
++DEVNAME=$(basename $TS_DEVICE)
+ 
+ ts_log "Create partitions"
+-$TS_CMD_FDISK ${DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
++$TS_CMD_FDISK ${TS_DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
+ n
+ p
+ 1
+@@ -71,6 +72,6 @@ cat /sys/block/${DEVNAME}/${DEVNAME}{1,2,3,4,5,6,7}/alignment_offset >> $TS_OUTP
+ 
+ rmmod scsi_debug
+ 
+-ts_fdisk_clean $DEVICE
++ts_fdisk_clean $TS_DEVICE
+ 
+ ts_finalize
+diff --git a/tests/ts/fdisk/align-512-4K-md b/tests/ts/fdisk/align-512-4K-md
+index 09947ff9e..ad662e0e8 100755
+--- a/tests/ts/fdisk/align-512-4K-md
++++ b/tests/ts/fdisk/align-512-4K-md
+@@ -27,11 +27,12 @@ TS_DESC="align 512/4K +MD"
+ ts_init "$*"
+ ts_skip_nonroot
+ 
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=50 sector_size=512 physblk_exp=3)
+-DEVNAME=$(basename $DEVICE)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=50 sector_size=512 physblk_exp=3
++DEVNAME=$(basename $TS_DEVICE)
+ 
+ ts_log "Create partitions"
+-$TS_CMD_FDISK ${DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
++$TS_CMD_FDISK ${TS_DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
+ n
+ p
+ 1
+@@ -56,7 +57,7 @@ MD_DEVICE=/dev/${MD_DEVNAME}
+ 
+ /sbin/mdadm -q -S ${MD_DEVICE} &> /dev/null
+ /sbin/mdadm -q --create ${MD_DEVICE} --metadata=0.90 --chunk=64 \
+-	    --level=0 --raid-devices=2 ${DEVICE}1 ${DEVICE}2 >> $TS_OUTPUT 2>&1
++	    --level=0 --raid-devices=2 ${TS_DEVICE}1 ${TS_DEVICE}2 >> $TS_OUTPUT 2>&1
+ 
+ udevadm settle
+ ts_log "Create partitions (MD)"
+@@ -85,6 +86,7 @@ cat /sys/block/${MD_DEVNAME}/${MD_DEVNAME}p{1,2}/alignment_offset >> $TS_OUTPUT
+ udevadm settle
+ rmmod scsi_debug
+ 
+-ts_fdisk_clean $DEVICE
++ts_fdisk_clean $TS_DEVICE
++ts_fdisk_clean $MD_DEVICE
+ 
+ ts_finalize
+diff --git a/tests/ts/fdisk/align-512-512-topology b/tests/ts/fdisk/align-512-512-topology
+index 9354e45c7..65cb03f1d 100755
+--- a/tests/ts/fdisk/align-512-512-topology
++++ b/tests/ts/fdisk/align-512-512-topology
+@@ -27,12 +27,12 @@ TS_DESC="align 512/512 +topology"
+ ts_init "$*"
+ ts_skip_nonroot
+ 
+-
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=50 sector_size=512)
+-DEVNAME=$(basename $DEVICE)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=50 sector_size=512
++DEVNAME=$(basename $TS_DEVICE)
+ 
+ ts_log "Create partitions"
+-$TS_CMD_FDISK ${DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
++$TS_CMD_FDISK ${TS_DEVICE} >> $TS_OUTPUT 2>&1 <<EOF
+ n
+ p
+ 1
+@@ -72,6 +72,6 @@ cat /sys/block/${DEVNAME}/${DEVNAME}{1,2,3,4,5,6,7}/alignment_offset >> $TS_OUTP
+ 
+ rmmod scsi_debug
+ 
+-ts_fdisk_clean $DEVICE
++ts_fdisk_clean $TS_DEVICE
+ 
+ ts_finalize
+diff --git a/tests/ts/libmount/context b/tests/ts/libmount/context
+index 0c3bce986..873890378 100755
+--- a/tests/ts/libmount/context
++++ b/tests/ts/libmount/context
+@@ -21,11 +21,12 @@ TS_NOEXIST="$TS_OUTDIR/${TS_TESTNAME}-${TS_SUBNAME}-noex"
+ ts_log "Init device"
+ umount $MOUNTPOINT &> /dev/null
+ 
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=100)
+-DEVNAME=$(basename $DEVICE)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=100
++DEVNAME=$(basename $TS_DEVICE)
+ 
+ ts_log "Create partitions"
+-$TS_CMD_FDISK ${DEVICE} &> /dev/null <<EOF
++$TS_CMD_FDISK ${TS_DEVICE} &> /dev/null <<EOF
+ n
+ p
+ 1
+@@ -35,7 +36,7 @@ w
+ q
+ EOF
+ 
+-DEVICE="${DEVICE}1"
++DEVICE="${TS_DEVICE}1"
+ 
+ sleep 1
+ udevadm settle
+diff --git a/tests/ts/libmount/context-utab b/tests/ts/libmount/context-utab
+index b2bfefc69..d57a64e6d 100755
+--- a/tests/ts/libmount/context-utab
++++ b/tests/ts/libmount/context-utab
+@@ -16,11 +16,12 @@ MOUNTPOINT="$TS_MOUNTPOINT"
+ 
+ [ -x $TESTPROG ] || ts_skip "test not compiled"
+ 
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=100)
+-DEVNAME=$(basename $DEVICE)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=100
++DEVNAME=$(basename $TS_DEVICE)
+ 
+ ts_log "Create partitions"
+-$TS_CMD_FDISK ${DEVICE} &> /dev/null <<EOF
++$TS_CMD_FDISK ${TS_DEVICE} &> /dev/null <<EOF
+ n
+ p
+ 1
+@@ -30,7 +31,7 @@ w
+ q
+ EOF
+ 
+-DEVICE="${DEVICE}1"
++DEVICE="${TS_DEVICE}1"
+ 
+ sleep 1
+ udevadm settle
+diff --git a/tests/ts/libmount/tabfiles-tags b/tests/ts/libmount/tabfiles-tags
+index f52c4047c..fbd7daf47 100755
+--- a/tests/ts/libmount/tabfiles-tags
++++ b/tests/ts/libmount/tabfiles-tags
+@@ -11,17 +11,18 @@ TESTPROG="$TS_HELPER_LIBMOUNT_TAB"
+ 
+ [ -x $TESTPROG ] || ts_skip "test not compiled"
+ 
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=50 sector_size=512)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=50 sector_size=512
+ LABEL="testLibmount"
+ UUID="de1bc6e9-34ab-4151-a1d7-900042eee8d9"
+ 
+ #
+ # Create filesystem
+ #
+-mkfs.ext3 -F -L $LABEL $DEVICE -U $UUID &> /dev/null || ts_die "Cannot make ext3 on $DEVICE" $DEVICE
++mkfs.ext3 -F -L $LABEL $TS_DEVICE -U $UUID &> /dev/null || ts_die "Cannot make ext3 on $TS_DEVICE" $TS_DEVICE
+ udevadm settle
+ 
+-ts_device_has_uuid $DEVICE || ts_die "Cannot find UUID on $DEVICE" $DEVICE
++ts_device_has_uuid $TS_DEVICE || ts_die "Cannot find UUID on $TS_DEVICE" $TS_DEVICE
+ 
+ FSTAB="$TS_OUTDIR/fstab"
+ 
+@@ -36,7 +37,7 @@ sed -i -e 's/fs: 0x.*/fs:/g' $TS_OUTPUT
+ ts_finalize_subtest
+ 
+ ts_init_subtest "fstab-label2dev"
+-ts_valgrind $TESTPROG --find-forward $FSTAB source $DEVICE &> $TS_OUTPUT
++ts_valgrind $TESTPROG --find-forward $FSTAB source $TS_DEVICE &> $TS_OUTPUT
+ sed -i -e 's/fs: 0x.*/fs:/g' $TS_OUTPUT
+ ts_finalize_subtest
+ 
+@@ -60,18 +61,18 @@ ts_finalize_subtest
+ 
+ ts_init_subtest "fstab-dev2label"
+ # has to return /mnt/mountpoint
+-ts_valgrind $TESTPROG --find-forward $FSTAB source $DEVICE &> $TS_OUTPUT
++ts_valgrind $TESTPROG --find-forward $FSTAB source $TS_DEVICE &> $TS_OUTPUT
+ sed -i -e 's/fs: 0x.*/fs:/g' $TS_OUTPUT
+ ts_finalize_subtest
+ 
+ #
+ # Add devname
+ #
+-echo "$DEVICE  /mnt/mountpoint3 auto defaults" >> $FSTAB
++echo "$TS_DEVICE  /mnt/mountpoint3 auto defaults" >> $FSTAB
+ 
+ ts_init_subtest "fstab-dev"
+ # has to return /mnt/mountpoint3
+-ts_valgrind $TESTPROG --find-forward $FSTAB source $DEVICE &> $TS_OUTPUT
++ts_valgrind $TESTPROG --find-forward $FSTAB source $TS_DEVICE &> $TS_OUTPUT
+ sed -i -e 's/fs: 0x.*/fs:/g' $TS_OUTPUT
+ sed -i -e 's/source: .*//g' $TS_OUTPUT		# devname is generated, remove it
+ ts_finalize_subtest
+diff --git a/tests/ts/mount/umount-alltargets b/tests/ts/mount/umount-alltargets
+index 434ecab2d..ae35e320a 100755
+--- a/tests/ts/mount/umount-alltargets
++++ b/tests/ts/mount/umount-alltargets
+@@ -12,10 +12,11 @@ ts_skip_nonroot
+ $TS_CMD_UMOUNT --help | grep -q all-targets
+ [ $? -eq 1 ] && ts_skip "all-targets unsupported"
+ 
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=50)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=50
+ 
+ ts_log "Create partitions"
+-$TS_CMD_FDISK ${DEVICE} &> /dev/null <<EOF
++$TS_CMD_FDISK ${TS_DEVICE} &> /dev/null <<EOF
+ n
+ p
+ 1
+@@ -42,13 +43,13 @@ EOF
+ udevadm settle
+ 
+ ts_log "Create filesystem A"
+-mkfs.ext2 ${DEVICE}1 &> /dev/null
++mkfs.ext2 ${TS_DEVICE}1 &> /dev/null
+ ts_log "Create filesystem B"
+-mkfs.ext2 ${DEVICE}2 &> /dev/null
++mkfs.ext2 ${TS_DEVICE}2 &> /dev/null
+ ts_log "Create filesystem C"
+-mkfs.ext2 ${DEVICE}3 &> /dev/null
++mkfs.ext2 ${TS_DEVICE}3 &> /dev/null
+ ts_log "Create filesystem D"
+-mkfs.ext2 ${DEVICE}4 &> /dev/null
++mkfs.ext2 ${TS_DEVICE}4 &> /dev/null
+ 
+ udevadm settle
+ 
+@@ -76,7 +77,7 @@ MOUNTPOINT=$TS_MOUNTPOINT
+ # The same device mounted on more places, umount all by mountpoint name
+ #
+ ts_init_subtest "all-targets-mnt"
+-multi_mount ${DEVICE}1 $MOUNTPOINT
++multi_mount ${TS_DEVICE}1 $MOUNTPOINT
+ $TS_CMD_UMOUNT --all-targets ${MOUNTPOINT}1 >> $TS_OUTPUT 2>&1
+ [ $? == 0 ] || ts_log "umount failed"
+ ts_finalize_subtest
+@@ -85,8 +86,8 @@ ts_finalize_subtest
+ # The same device mounted on more places, umount all by device name
+ #
+ ts_init_subtest "all-targets-dev"
+-multi_mount ${DEVICE}1 $MOUNTPOINT
+-$TS_CMD_UMOUNT --all-targets ${DEVICE}1 >> $TS_OUTPUT 2>&1
++multi_mount ${TS_DEVICE}1 $MOUNTPOINT
++$TS_CMD_UMOUNT --all-targets ${TS_DEVICE}1 >> $TS_OUTPUT 2>&1
+ [ $? == 0 ] || ts_log "umount failed"
+ ts_finalize_subtest
+ 
+@@ -95,14 +96,14 @@ ts_finalize_subtest
+ # sub-mounts. Umount all by one umount all by top-level device name.
+ #
+ ts_init_subtest "all-targets-recursive"
+-multi_mount ${DEVICE}1 $MOUNTPOINT
++multi_mount ${TS_DEVICE}1 $MOUNTPOINT
+ [ -d "${MOUNTPOINT}1/subA" ] || mkdir -p ${MOUNTPOINT}1/subA
+-$TS_CMD_MOUNT ${DEVICE}2 ${MOUNTPOINT}1/subA
++$TS_CMD_MOUNT ${TS_DEVICE}2 ${MOUNTPOINT}1/subA
+ [ -d "${MOUNTPOINT}1/subA/subAB" ] || mkdir -p ${MOUNTPOINT}1/subA/subAB
+-$TS_CMD_MOUNT ${DEVICE}3 ${MOUNTPOINT}1/subA/subAB
++$TS_CMD_MOUNT ${TS_DEVICE}3 ${MOUNTPOINT}1/subA/subAB
+ [ -d "${MOUNTPOINT}1/subB" ] || mkdir -p ${MOUNTPOINT}1/subB
+-$TS_CMD_MOUNT ${DEVICE}4 ${MOUNTPOINT}1/subB
+-$TS_CMD_UMOUNT --recursive --all-targets ${DEVICE}1 >> $TS_OUTPUT 2>&1
++$TS_CMD_MOUNT ${TS_DEVICE}4 ${MOUNTPOINT}1/subB
++$TS_CMD_UMOUNT --recursive --all-targets ${TS_DEVICE}1 >> $TS_OUTPUT 2>&1
+ [ $? == 0 ] || ts_log "umount failed"
+ ts_finalize_subtest
+ 
+diff --git a/tests/ts/mount/umount-recursive b/tests/ts/mount/umount-recursive
+index 85e54df7a..9b9a7a1f1 100755
+--- a/tests/ts/mount/umount-recursive
++++ b/tests/ts/mount/umount-recursive
+@@ -13,10 +13,11 @@ $TS_CMD_UMOUNT --help | grep -q recursive
+ [ $? -eq 1 ] && ts_skip "recursive unsupported"
+ 
+ ts_log "Init device"
+-DEVICE=$(ts_scsi_debug_init dev_size_mb=50)
++# set global variable TS_DEVICE
++ts_scsi_debug_init dev_size_mb=50
+ 
+ ts_log "Create partitions"
+-$TS_CMD_FDISK ${DEVICE} &> /dev/null <<EOF
++$TS_CMD_FDISK ${TS_DEVICE} &> /dev/null <<EOF
+ n
+ p
+ 1
+@@ -43,13 +44,13 @@ EOF
+ udevadm settle
+ 
+ ts_log "Create filesystem A"
+-mkfs.ext2 ${DEVICE}1 &> /dev/null
++mkfs.ext2 ${TS_DEVICE}1 &> /dev/null
+ ts_log "Create filesystem B"
+-mkfs.ext2 ${DEVICE}2 &> /dev/null
++mkfs.ext2 ${TS_DEVICE}2 &> /dev/null
+ ts_log "Create filesystem C"
+-mkfs.ext2 ${DEVICE}3 &> /dev/null
++mkfs.ext2 ${TS_DEVICE}3 &> /dev/null
+ ts_log "Create filesystem D"
+-mkfs.ext2 ${DEVICE}4 &> /dev/null
++mkfs.ext2 ${TS_DEVICE}4 &> /dev/null
+ 
+ udevadm settle
+ 
+@@ -58,12 +59,12 @@ ts_log "Do tests..."
+ [ -d "$TS_MOUNTPOINT" ] || mkdir -p $TS_MOUNTPOINT
+ 
+ ts_log "A) Mount root"
+-$TS_CMD_MOUNT ${DEVICE}1 $TS_MOUNTPOINT >> $TS_OUTPUT 2>&1
++$TS_CMD_MOUNT ${TS_DEVICE}1 $TS_MOUNTPOINT >> $TS_OUTPUT 2>&1
+ $TS_CMD_MOUNT --make-shared $TS_MOUNTPOINT
+ 
+ ts_log "B) Mount child"
+ mkdir -p $TS_MOUNTPOINT/mntB
+-$TS_CMD_MOUNT ${DEVICE}2 $TS_MOUNTPOINT/mntB >> $TS_OUTPUT 2>&1
++$TS_CMD_MOUNT ${TS_DEVICE}2 $TS_MOUNTPOINT/mntB >> $TS_OUTPUT 2>&1
+ 
+ ts_log "B2) Mount child-bind"
+ mkdir -p $TS_MOUNTPOINT/bindB
+@@ -71,10 +72,10 @@ $TS_CMD_MOUNT --bind $TS_MOUNTPOINT/mntB $TS_MOUNTPOINT/bindB >> $TS_OUTPUT 2>&1
+ 
+ ts_log "C) Mount child/child"
+ mkdir -p $TS_MOUNTPOINT/mntB/mnt{C,D}
+-$TS_CMD_MOUNT ${DEVICE}3 $TS_MOUNTPOINT/mntB/mntC >> $TS_OUTPUT 2>&1
++$TS_CMD_MOUNT ${TS_DEVICE}3 $TS_MOUNTPOINT/mntB/mntC >> $TS_OUTPUT 2>&1
+ 
+ ts_log "D) Mount child/child"
+-$TS_CMD_MOUNT ${DEVICE}4 $TS_MOUNTPOINT/mntB/mntD >> $TS_OUTPUT 2>&1
++$TS_CMD_MOUNT ${TS_DEVICE}4 $TS_MOUNTPOINT/mntB/mntD >> $TS_OUTPUT 2>&1
+ 
+ ts_log "E) Mount child-bind"
+ mkdir -p $TS_MOUNTPOINT/bindC
+-- 
+2.13.6
+

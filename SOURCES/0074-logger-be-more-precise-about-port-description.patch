@@ -1,0 +1,41 @@
+From f4ffe3de3ba721892af52c7ed5787f4470393242 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 21 Jun 2016 13:35:33 +0200
+Subject: [PATCH 74/84] logger: be more precise about --port description
+
+Upstream: http://github.com/karelzak/util-linux/commit/1c7227598824b1d9140298e9fe5742cae4131130
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1344222
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ misc-utils/logger.1 | 1 +
+ misc-utils/logger.c | 2 +-
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/misc-utils/logger.1 b/misc-utils/logger.1
+index 5eb8d09..8c4faca 100644
+--- a/misc-utils/logger.1
++++ b/misc-utils/logger.1
+@@ -72,6 +72,7 @@ port defined in /etc/services, which is often
+ \fB\-P\fR, \fB\-\-port\fR \fIport\fR
+ Use the specified
+ .IR port .
++When this option is not specified, the port defaults to syslog for udp and to syslog-conn for tcp connections.
+ .TP
+ \fB\-i\fR, \fB\-\-id\fR
+ Log the process ID of the logger process with each line.
+diff --git a/misc-utils/logger.c b/misc-utils/logger.c
+index c83c0b8..a331869 100644
+--- a/misc-utils/logger.c
++++ b/misc-utils/logger.c
+@@ -222,7 +222,7 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
+ 		" -f, --file <file>     log the contents of this file\n"
+ 		" -h, --help            display this help text and exit\n"), out);
+ 	fputs(_(" -n, --server <name>   write to this remote syslog server\n"
+-		" -P, --port <number>   use this UDP port\n"
++		" -P, --port <port>     use this port for UDP or TCP connection\n"
+ 		" -p, --priority <prio> mark given message with this priority\n"
+ 		" -s, --stderr          output message to standard error as well\n"), out);
+ 	fputs(_(" -t, --tag <tag>       mark every line with this tag\n"
+-- 
+2.7.4
+

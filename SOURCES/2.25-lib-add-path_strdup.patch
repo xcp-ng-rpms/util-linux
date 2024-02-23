@@ -1,0 +1,51 @@
+From dd3bc51a539ffdd5c6c6b7d0b20acd1f61bdd337 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 6 Jan 2014 16:48:13 +0100
+Subject: [PATCH] lib/path: add path_strdup()
+
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ include/path.h |  2 ++
+ lib/path.c     | 13 +++++++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/include/path.h b/include/path.h
+index 615d284..45da692 100644
+--- a/include/path.h
++++ b/include/path.h
+@@ -4,6 +4,8 @@
+ #include <stdio.h>
+ #include <stdint.h>
+ 
++extern char *path_strdup(const char *path, ...)
++			__attribute__ ((__format__ (__printf__, 1, 2)));
+ extern FILE *path_fopen(const char *mode, int exit_on_err, const char *path, ...)
+ 			__attribute__ ((__format__ (__printf__, 3, 4)));
+ extern void path_read_str(char *result, size_t len, const char *path, ...)
+diff --git a/lib/path.c b/lib/path.c
+index 1f7e258..42d321c 100644
+--- a/lib/path.c
++++ b/lib/path.c
+@@ -49,6 +49,19 @@ path_vcreate(const char *path, va_list ap)
+ 	return pathbuf;
+ }
+ 
++char *
++path_strdup(const char *path, ...)
++{
++	const char *p;
++	va_list ap;
++
++	va_start(ap, path);
++	p = path_vcreate(path, ap);
++	va_end(ap);
++
++	return p ? strdup(p) : NULL;
++}
++
+ static FILE *
+ path_vfopen(const char *mode, int exit_on_error, const char *path, va_list ap)
+ {
+-- 
+1.8.4.2
+

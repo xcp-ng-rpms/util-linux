@@ -1,0 +1,176 @@
+From 75b6c0e045abb7e07773b924237c562ab9920c60 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 26 May 2016 12:02:12 +0200
+Subject: [PATCH 85/86] libblkid: store only canonical devnames to the cache
+
+Let's try to use symlink:
+
+ # ls -la /dev/block/8\:1
+ # lrwxrwxrwx 1 root root 7 May 25 16:42 /dev/block/8:1 -> ../sda1
+
+ # blkid /dev/block/8:1
+ /dev/block/8:3: LABEL="HOME" UUID="196972ad-3b13-4bba-ac54-4cb3f7b409a4" TYPE="ext4" PARTUUID="6073277f-87bc-43ff-bcfd-724c4484a63a"
+
+unfortunately the symlink is stored to the cache:
+
+ <device DEVNO="0x0803" TIME="1464253300.715279" LABEL="HOME" UUID="196972ad-3b13-4bba-ac54-4cb3f7b409a4" TYPE="ext4" PARTUUID="6073277f-87bc-43ff-bcfd-724c4484a63a">/dev/block/8:3</device>
+
+next time if you ask for LABEL=HOME the answer will be /dev/block/8:3
+rather than /dev/sda3.
+
+It seems better to canonicalize the paths we store to the cache.
+
+Unfortunately if you ask for /dev/block/8:3 then you probably expect
+that blkid_dev_devname() returns the same path. This patch introduces
+dev->bid_xname, this is the path used by application (and never stored
+in the cache).
+
+Upstream: http://github.com/karelzak/util-linux/commit/924c93d9df118338fd54cd73b4a45ccddc4ac103
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1007734
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libblkid/src/blkidP.h  |  4 +++-
+ libblkid/src/dev.c     | 11 +++++++++--
+ libblkid/src/devname.c | 43 +++++++++++++++++++++++++++++++++++++------
+ 3 files changed, 49 insertions(+), 9 deletions(-)
+
+diff --git a/libblkid/src/blkidP.h b/libblkid/src/blkidP.h
+index 7de84b4..8183c12 100644
+--- a/libblkid/src/blkidP.h
++++ b/libblkid/src/blkidP.h
+@@ -44,7 +44,7 @@ struct blkid_struct_dev
+ 	struct list_head	bid_devs;	/* All devices in the cache */
+ 	struct list_head	bid_tags;	/* All tags for this device */
+ 	blkid_cache		bid_cache;	/* Dev belongs to this cache */
+-	char			*bid_name;	/* Device inode pathname */
++	char			*bid_name;	/* Device real pathn (as used in cache) */
+ 	char			*bid_type;	/* Preferred device TYPE */
+ 	int			bid_pri;	/* Device priority */
+ 	dev_t			bid_devno;	/* Device major/minor number */
+@@ -53,6 +53,8 @@ struct blkid_struct_dev
+ 	unsigned int		bid_flags;	/* Device status bitflags */
+ 	char			*bid_label;	/* Shortcut to device LABEL */
+ 	char			*bid_uuid;	/* Shortcut to binary UUID */
++
++	char			*bid_xname;	/* Device path as used by application (maybe symlink..) */
+ };
+ 
+ #define BLKID_BID_FL_VERIFIED	0x0001	/* Device data validated from disk */
+diff --git a/libblkid/src/dev.c b/libblkid/src/dev.c
+index a4b2aea..d2fd3f4 100644
+--- a/libblkid/src/dev.c
++++ b/libblkid/src/dev.c
+@@ -60,16 +60,23 @@ void blkid_free_dev(blkid_dev dev)
+ 					   bit_tags);
+ 		blkid_free_tag(tag);
+ 	}
++	free(dev->bid_xname);
+ 	free(dev->bid_name);
+ 	free(dev);
+ }
+ 
+ /*
+- * Given a blkid device, return its name
++ * Given a blkid device, return its name. The function returns the name
++ * previously used for blkid_get_dev(). This name does not have to be canonical
++ * (real path) name, but for example symlink.
+  */
+ const char *blkid_dev_devname(blkid_dev dev)
+ {
+-	return dev ? dev->bid_name : NULL;
++	if (!dev)
++		return NULL;
++	if (dev->bid_xname)
++		return dev->bid_xname;
++	return dev->bid_name;
+ }
+ 
+ #ifdef CONFIG_BLKID_DEBUG
+diff --git a/libblkid/src/devname.c b/libblkid/src/devname.c
+index 497deaf..55b9594 100644
+--- a/libblkid/src/devname.c
++++ b/libblkid/src/devname.c
+@@ -51,28 +51,55 @@ blkid_dev blkid_get_dev(blkid_cache cache, const char *devname, int flags)
+ {
+ 	blkid_dev dev = NULL, tmp;
+ 	struct list_head *p, *pnext;
++	char *cn = NULL;
+ 
+ 	if (!cache || !devname)
+ 		return NULL;
+ 
++	/* search by name */
+ 	list_for_each(p, &cache->bic_devs) {
+ 		tmp = list_entry(p, struct blkid_struct_dev, bid_devs);
+ 		if (strcmp(tmp->bid_name, devname))
+ 			continue;
+-
+-		DBG(DEVNAME, blkid_debug("found devname %s in cache", tmp->bid_name));
+ 		dev = tmp;
+ 		break;
+ 	}
+ 
++	/* try canonicalize the name */
++	if (!dev && (cn = canonicalize_path(devname))) {
++		if (strcmp(cn, devname) != 0) {
++			DBG(DEVNAME, blkid_debug("search cannonical %s", cn));
++			list_for_each(p, &cache->bic_devs) {
++				tmp = list_entry(p, struct blkid_struct_dev, bid_devs);
++				if (strcmp(tmp->bid_name, cn))
++					continue;
++				dev = tmp;
++
++				/* update name returned by blkid_dev_devname() */
++				free(dev->bid_xname);
++				dev->bid_xname = strdup(devname);
++				break;
++			}
++		} else {
++			free(cn);
++			cn = NULL;
++		}
++	}
++
+ 	if (!dev && (flags & BLKID_DEV_CREATE)) {
+ 		if (access(devname, F_OK) < 0)
+-			return NULL;
++			goto done;
+ 		dev = blkid_new_dev();
+ 		if (!dev)
+-			return NULL;
++			goto done;
+ 		dev->bid_time = INT_MIN;
+-		dev->bid_name = strdup(devname);
++		if (cn) {
++			dev->bid_name = cn;
++			dev->bid_xname = strdup(devname);
++			cn = NULL;	/* see free() below */
++		} else
++			dev->bid_name = strdup(devname);
++
+ 		dev->bid_cache = cache;
+ 		list_add_tail(&dev->bid_devs, &cache->bic_devs);
+ 		cache->bic_flags |= BLKID_BIC_FL_CHANGED;
+@@ -81,7 +108,7 @@ blkid_dev blkid_get_dev(blkid_cache cache, const char *devname, int flags)
+ 	if (flags & BLKID_DEV_VERIFY) {
+ 		dev = blkid_verify(cache, dev);
+ 		if (!dev || !(dev->bid_flags & BLKID_BID_FL_VERIFIED))
+-			return dev;
++			goto done;
+ 		/*
+ 		 * If the device is verified, then search the blkid
+ 		 * cache for any entries that match on the type, uuid,
+@@ -112,6 +139,10 @@ blkid_dev blkid_get_dev(blkid_cache cache, const char *devname, int flags)
+ 				blkid_free_dev(dev2);
+ 		}
+ 	}
++done:
++	if (dev)
++		DBG(DEVNAME, blkid_debug("%s requested, found %s in cache", devname, dev->bid_name));
++	free(cn);
+ 	return dev;
+ }
+ 
+-- 
+2.7.4
+

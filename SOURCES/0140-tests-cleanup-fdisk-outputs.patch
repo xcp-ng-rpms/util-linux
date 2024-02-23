@@ -1,0 +1,86 @@
+From 0c4c724109d160e336d38f0a50fd82c9f5184ddb Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 17 Oct 2017 12:35:31 +0200
+Subject: [PATCH 140/141] tests: cleanup fdisk outputs
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1454652
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ tests/expected/fdisk/align-512-4K-md |  6 +++---
+ tests/expected/fdisk/align-512-512   | 16 ++++++++--------
+ tests/ts/fdisk/align-512-512         |  3 +--
+ 3 files changed, 12 insertions(+), 13 deletions(-)
+
+diff --git a/tests/expected/fdisk/align-512-4K-md b/tests/expected/fdisk/align-512-4K-md
+index e8f6ba161..336c9e019 100644
+--- a/tests/expected/fdisk/align-512-4K-md
++++ b/tests/expected/fdisk/align-512-4K-md
+@@ -69,7 +69,7 @@ Select (default p): Partition number (2-4, default 2): First sector (22528-10009
+ Last sector, +sectors or +size{K,M,G} (22528-100095, default 100095): Partition 2 of type Linux and of size 10 MiB is set
+ 
+ Command (m for help): 
+-Disk /dev/md8: 51 MB, 51249152 bytes, 100096 sectors
++Disk /dev/...: 51 MB, 51249152 bytes, 100096 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 4096 bytes
+ I/O size (minimum/optimal): 65536 bytes / <removed> bytes
+@@ -77,8 +77,8 @@ Disk label type: dos
+ 
+ 
+     Device Boot      Start         End      Blocks   Id  System
+-/dev/md8p1            2048       22527       10240   83  Linux
+-/dev/md8p2           22528       43007       10240   83  Linux
++/dev/...p1            2048       22527       10240   83  Linux
++/dev/...p2           22528       43007       10240   83  Linux
+ 
+ Command (m for help): The partition table has been altered!
+ 
+diff --git a/tests/expected/fdisk/align-512-512 b/tests/expected/fdisk/align-512-512
+index 8e03d900d..f9cbb0e89 100644
+--- a/tests/expected/fdisk/align-512-512
++++ b/tests/expected/fdisk/align-512-512
+@@ -50,7 +50,7 @@ Last sector, +sectors or +size{K,M,G} (90112-102399, default 102399): Using defa
+ Partition 7 of type Linux and of size 6 MiB is set
+ 
+ Command (m for help): 
+-Disk /dev/loop0: 52 MB, 52428800 bytes, 102400 sectors
++Disk /dev/...: 52 MB, 52428800 bytes, 102400 sectors
+ Units = sectors of 1 * 512 = 512 bytes
+ Sector size (logical/physical): 512 bytes / 512 bytes
+ I/O size (minimum/optimal): 512 bytes / <removed> bytes
+@@ -58,12 +58,12 @@ Disk label type: dos
+ 
+ 
+       Device Boot      Start         End      Blocks   Id  System
+-/dev/loop0p1            2048       22527       10240   83  Linux
+-/dev/loop0p2           22528       43007       10240   83  Linux
+-/dev/loop0p3           43008       63487       10240   83  Linux
+-/dev/loop0p4           63488      102399       19456    5  Extended
+-/dev/loop0p5           65536       75775        5120   83  Linux
+-/dev/loop0p6           77824       88063        5120   83  Linux
+-/dev/loop0p7           90112      102399        6144   83  Linux
++/dev/...p1            2048       22527       10240   83  Linux
++/dev/...p2           22528       43007       10240   83  Linux
++/dev/...p3           43008       63487       10240   83  Linux
++/dev/...p4           63488      102399       19456    5  Extended
++/dev/...p5           65536       75775        5120   83  Linux
++/dev/...p6           77824       88063        5120   83  Linux
++/dev/...p7           90112      102399        6144   83  Linux
+ 
+ Command (m for help): 
+diff --git a/tests/ts/fdisk/align-512-512 b/tests/ts/fdisk/align-512-512
+index 82a6268cf..03133a6d1 100755
+--- a/tests/ts/fdisk/align-512-512
++++ b/tests/ts/fdisk/align-512-512
+@@ -64,7 +64,6 @@ q
+ EOF
+ 
+ ts_device_deinit $DEVICE
+-
+-ts_fdisk_clean
++ts_fdisk_clean $DEVICE
+ 
+ ts_finalize
+-- 
+2.13.6
+

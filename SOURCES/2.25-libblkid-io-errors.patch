@@ -1,0 +1,2590 @@
+diff -up util-linux-2.23.2/libblkid/src/blkidP.h.kzak util-linux-2.23.2/libblkid/src/blkidP.h
+--- util-linux-2.23.2/libblkid/src/blkidP.h.kzak	2014-03-28 15:11:18.334283704 +0100
++++ util-linux-2.23.2/libblkid/src/blkidP.h	2014-03-28 15:11:44.676551975 +0100
+@@ -297,6 +297,9 @@ struct blkid_struct_cache
+ /* old systems */
+ #define BLKID_CACHE_FILE_OLD	"/etc/blkid.tab"
+ 
++#define BLKID_PROBE_OK	 0
++#define BLKID_PROBE_NONE 1
++
+ #define BLKID_ERR_IO	 5
+ #define BLKID_ERR_PROC	 9
+ #define BLKID_ERR_MEM	12
+diff -up util-linux-2.23.2/libblkid/src/partitions/aix.c.kzak util-linux-2.23.2/libblkid/src/partitions/aix.c
+--- util-linux-2.23.2/libblkid/src/partitions/aix.c.kzak	2013-05-30 15:21:43.120591308 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/aix.c	2014-03-28 15:11:44.676551975 +0100
+@@ -22,19 +22,17 @@ static int probe_aix_pt(blkid_probe pr,
+ 
+ 	if (blkid_partitions_need_typeonly(pr))
+ 		/* caller does not ask for details about partitions */
+-		return 0;
++		return BLKID_PROBE_OK;
+ 
+ 	ls = blkid_probe_get_partlist(pr);
+ 	if (!ls)
+-		goto err;
++		return BLKID_PROBE_NONE;
+ 
+ 	tab = blkid_partlist_new_parttable(ls, "aix", 0);
+ 	if (!tab)
+-		goto err;
++		return -ENOMEM;
+ 
+-	return 0;
+-err:
+-	return -1;
++	return BLKID_PROBE_OK;
+ }
+ 
+ /*
+diff -up util-linux-2.23.2/libblkid/src/partitions/bsd.c.kzak util-linux-2.23.2/libblkid/src/partitions/bsd.c
+--- util-linux-2.23.2/libblkid/src/partitions/bsd.c.kzak	2013-07-15 10:25:46.283049056 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/bsd.c	2014-03-28 15:11:44.677551986 +0100
+@@ -113,20 +113,24 @@ static int probe_bsd_pt(blkid_probe pr,
+ 	blkid_partlist ls;
+ 	int i, nparts = BSD_MAXPARTITIONS;
+ 	unsigned char *data;
++	int rc = BLKID_PROBE_NONE;
+ 
+ 	if (blkid_partitions_need_typeonly(pr))
+ 		/* caller does not ask for details about partitions */
+-		return 0;
++		return rc;
+ 
+ 	data = blkid_probe_get_sector(pr, BLKID_MAG_SECTOR(mag));
+-	if (!data)
++	if (!data) {
++		if (errno)
++			rc = -errno;
+ 		goto nothing;
++	}
+ 
+ 	l = (struct bsd_disklabel *) data + BLKID_MAG_LASTOFFSET(mag);
+ 
+ 	ls = blkid_probe_get_partlist(pr);
+ 	if (!ls)
+-		goto err;
++		goto nothing;
+ 
+ 	/* try to determine the real type of BSD system according to
+ 	 * (parental) primary partition */
+@@ -152,8 +156,10 @@ static int probe_bsd_pt(blkid_probe pr,
+ 	}
+ 
+ 	tab = blkid_partlist_new_parttable(ls, name, BLKID_MAG_OFFSET(mag));
+-	if (!tab)
+-		goto err;
++	if (!tab) {
++		rc = -ENOMEM;
++		goto nothing;
++	}
+ 
+ 	if (le16_to_cpu(l->d_npartitions) < BSD_MAXPARTITIONS)
+ 		nparts = le16_to_cpu(l->d_npartitions);
+@@ -189,18 +195,18 @@ static int probe_bsd_pt(blkid_probe pr,
+ 		}
+ 
+ 		par = blkid_partlist_add_partition(ls, tab, start, size);
+-		if (!par)
+-			goto err;
++		if (!par) {
++			rc = -ENOMEM;
++			goto nothing;
++		}
+ 
+ 		blkid_partition_set_type(par, p->p_fstype);
+ 	}
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ 
+ nothing:
+-	return 1;
+-err:
+-	return -1;
++	return rc;
+ }
+ 
+ 
+diff -up util-linux-2.23.2/libblkid/src/partitions/dos.c.kzak util-linux-2.23.2/libblkid/src/partitions/dos.c
+--- util-linux-2.23.2/libblkid/src/partitions/dos.c.kzak	2013-07-30 10:39:26.205738229 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/dos.c	2014-03-28 15:13:23.220555797 +0100
+@@ -53,10 +53,13 @@ static int parse_dos_extended(blkid_prob
+ 		uint32_t start, size;
+ 
+ 		if (++ct_nodata > 100)
+-			return 0;
++			return BLKID_PROBE_OK;
+ 		data = blkid_probe_get_sector(pr, cur_start);
+-		if (!data)
++		if (!data) {
++			if (errno)
++				return -errno;
+ 			goto leave;	/* malformed partition? */
++		}
+ 
+ 		if (!is_valid_mbr_signature(data))
+ 			goto leave;
+@@ -99,7 +102,7 @@ static int parse_dos_extended(blkid_prob
+ 
+ 			par = blkid_partlist_add_partition(ls, tab, abs_start, size);
+ 			if (!par)
+-				goto err;
++				return -ENOMEM;
+ 
+ 			blkid_partition_set_type(par, p->sys_type);
+ 			blkid_partition_set_flags(par, p->boot_ind);
+@@ -123,9 +126,7 @@ static int parse_dos_extended(blkid_prob
+ 		cur_size = size;
+ 	}
+ leave:
+-	return 0;
+-err:
+-	return -1;
++	return BLKID_PROBE_OK;
+ }
+ 
+ static int probe_dos_pt(blkid_probe pr,
+@@ -140,8 +141,11 @@ static int probe_dos_pt(blkid_probe pr,
+ 	uint32_t start, size, id;
+ 
+ 	data = blkid_probe_get_sector(pr, 0);
+-	if (!data)
++	if (!data) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	/* ignore disks with AIX magic number -- for more details see aix.c */
+ 	if (memcmp(data, BLKID_AIX_MAGIC_STRING, BLKID_AIX_MAGIC_STRLEN) == 0)
+@@ -152,7 +156,7 @@ static int probe_dos_pt(blkid_probe pr,
+ 	 * either the boot sector of a FAT filesystem or a DOS-type
+ 	 * partition table.
+ 	 */
+-	if (blkid_probe_is_vfat(pr)) {
++	if (blkid_probe_is_vfat(pr) == 1) {
+ 		DBG(LOWPROBE, blkid_debug("probably FAT -- ignore"));
+ 		goto nothing;
+ 	}
+@@ -189,6 +193,8 @@ static int probe_dos_pt(blkid_probe pr,
+ 		return 0;
+ 
+ 	ls = blkid_probe_get_partlist(pr);
++	if (!ls)
++		goto nothing;
+ 
+ 	/* sector size factor (the start and size are in the real sectors, but
+ 	 * we need to convert all sizes to 512 logical sectors
+@@ -198,7 +204,7 @@ static int probe_dos_pt(blkid_probe pr,
+ 	/* allocate a new partition table */
+ 	tab = blkid_partlist_new_parttable(ls, "dos", BLKID_MSDOS_PT_OFFSET);
+ 	if (!tab)
+-		goto err;
++		return -ENOMEM;
+ 
+ 	id = dos_parttable_id(data);
+ 	if (id) {
+@@ -224,7 +230,7 @@ static int probe_dos_pt(blkid_probe pr,
+ 		}
+ 		par = blkid_partlist_add_partition(ls, tab, start, size);
+ 		if (!par)
+-			goto err;
++			return -ENOMEM;
+ 
+ 		blkid_partition_set_type(par, p->sys_type);
+ 		blkid_partition_set_flags(par, p->boot_ind);
+@@ -244,13 +250,14 @@ static int probe_dos_pt(blkid_probe pr,
+ 			continue;
+ 		if (is_extended(p) &&
+ 		    parse_dos_extended(pr, tab, start, size, ssf) == -1)
+-			goto err;
++			goto nothing;
+ 	}
+ 
+ 	/* Parse subtypes (nested partitions) on large disks */
+ 	if (!blkid_probe_is_tiny(pr)) {
+ 		for (p = p0, i = 0; i < 4; i++, p++) {
+ 			size_t n;
++			int rc;
+ 
+ 			if (!dos_partition_size(p) || is_extended(p))
+ 				continue;
+@@ -259,20 +266,19 @@ static int probe_dos_pt(blkid_probe pr,
+ 				if (dos_nested[n].type != p->sys_type)
+ 					continue;
+ 
+-				if (blkid_partitions_do_subprobe(pr,
++				rc = blkid_partitions_do_subprobe(pr,
+ 						blkid_partlist_get_partition(ls, i),
+-						dos_nested[n].id) == -1)
+-					goto err;
++						dos_nested[n].id);
++				if (rc < 0)
++					return rc;
+ 				break;
+ 			}
+ 		}
+ 	}
+-	return 0;
++	return BLKID_PROBE_OK;
+ 
+ nothing:
+-	return 1;
+-err:
+-	return -1;
++	return BLKID_PROBE_NONE;
+ }
+ 
+ 
+diff -up util-linux-2.23.2/libblkid/src/partitions/gpt.c.kzak util-linux-2.23.2/libblkid/src/partitions/gpt.c
+--- util-linux-2.23.2/libblkid/src/partitions/gpt.c.kzak	2014-03-28 15:11:18.336283724 +0100
++++ util-linux-2.23.2/libblkid/src/partitions/gpt.c	2014-03-28 15:11:44.677551986 +0100
+@@ -169,8 +169,11 @@ static int is_pmbr_valid(blkid_probe pr,
+ 		goto ok;			/* skip PMBR check */
+ 
+ 	data = blkid_probe_get_sector(pr, 0);
+-	if (!data)
++	if (!data) {
++		if (errno)
++			return -errno;
+ 		goto failed;
++	}
+ 
+ 	if (!is_valid_mbr_signature(data))
+ 		goto failed;
+@@ -305,19 +308,27 @@ static int probe_gpt_pt(blkid_probe pr,
+ 	uint64_t fu, lu;
+ 	uint32_t ssf, i;
+ 	efi_guid_t guid;
++	int ret;
+ 
+ 	if (last_lba(pr, &lastlba))
+ 		goto nothing;
+ 
+-	if (!is_pmbr_valid(pr, NULL))
++	ret = is_pmbr_valid(pr, NULL);
++	if (ret < 0)
++		return ret;
++	else if (ret == 0)
+ 		goto nothing;
+ 
++	errno = 0;
+ 	h = get_gpt_header(pr, &hdr, &e, (lba = GPT_PRIMARY_LBA), lastlba);
+-	if (!h)
++	if (!h && !errno)
+ 		h = get_gpt_header(pr, &hdr, &e, (lba = lastlba), lastlba);
+ 
+-	if (!h)
++	if (!h) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	blkid_probe_use_wiper(pr, lba * blkid_probe_get_size(pr), 8);
+ 
+@@ -388,12 +399,13 @@ static int probe_gpt_pt(blkid_probe pr,
+ 		blkid_partition_set_flags(par, e->attributes);
+ 	}
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ 
+ nothing:
+-	return 1;
++	return BLKID_PROBE_NONE;
++
+ err:
+-	return -1;
++	return -ENOMEM;
+ }
+ 
+ 
+diff -up util-linux-2.23.2/libblkid/src/partitions/mac.c.kzak util-linux-2.23.2/libblkid/src/partitions/mac.c
+--- util-linux-2.23.2/libblkid/src/partitions/mac.c.kzak	2013-06-13 09:46:10.418650605 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/mac.c	2014-03-28 15:11:44.677551986 +0100
+@@ -87,8 +87,11 @@ static int probe_mac_pt(blkid_probe pr,
+ 	 * the first block on the disk.
+ 	 */
+ 	md = (struct mac_driver_desc *) blkid_probe_get_sector(pr, 0);
+-	if (!md)
++	if (!md) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	block_size = be16_to_cpu(md->block_size);
+ 
+@@ -96,8 +99,11 @@ static int probe_mac_pt(blkid_probe pr,
+ 	 * the second block on the disk.
+ 	 */
+ 	p = (struct mac_partition *) get_mac_block(pr, block_size, 1);
+-	if (!p)
++	if (!p) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	/* check the first partition signature */
+ 	if (!has_part_signature(p))
+@@ -109,7 +115,7 @@ static int probe_mac_pt(blkid_probe pr,
+ 
+ 	ls = blkid_probe_get_partlist(pr);
+ 	if (!ls)
+-		goto err;
++		goto nothing;
+ 
+ 	tab = blkid_partlist_new_parttable(ls, "mac", 0);
+ 	if (!tab)
+@@ -124,15 +130,18 @@ static int probe_mac_pt(blkid_probe pr,
+ 		uint32_t size;
+ 
+ 		p = (struct mac_partition *) get_mac_block(pr, block_size, i);
+-		if (!p)
++		if (!p) {
++			if (errno)
++				return -errno;
+ 			goto nothing;
++		}
+ 		if (!has_part_signature(p))
+ 			goto nothing;
+ 
+ 		if (be32_to_cpu(p->map_count) != nblks) {
+ 			DBG(LOWPROBE, blkid_debug(
+ 				"mac: inconsisten map_count in partition map, "
+-			        "entry[0]: %d, entry[%d]: %d",
++				"entry[0]: %d, entry[%d]: %d",
+ 				nblks, i - 1,
+ 				be32_to_cpu(p->map_count)));
+ 		}
+@@ -157,12 +166,12 @@ static int probe_mac_pt(blkid_probe pr,
+ 						sizeof(p->type));
+ 	}
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ 
+ nothing:
+-	return 1;
++	return BLKID_PROBE_NONE;
+ err:
+-	return -1;
++	return -ENOMEM;
+ }
+ 
+ /*
+diff -up util-linux-2.23.2/libblkid/src/partitions/minix.c.kzak util-linux-2.23.2/libblkid/src/partitions/minix.c
+--- util-linux-2.23.2/libblkid/src/partitions/minix.c.kzak	2013-07-15 10:25:46.284049064 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/minix.c	2014-03-28 15:36:23.866715100 +0100
+@@ -26,12 +26,15 @@ static int probe_minix_pt(blkid_probe pr
+ 	int i;
+ 
+ 	data = blkid_probe_get_sector(pr, 0);
+-	if (!data)
++	if (!data) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	ls = blkid_probe_get_partlist(pr);
+ 	if (!ls)
+-		goto err;
++		goto nothing;
+ 
+ 	/* Parent is required, because Minix uses the same PT as DOS and
+ 	 * difference is only in primary partition (parent) type.
+@@ -78,12 +81,12 @@ static int probe_minix_pt(blkid_probe pr
+ 		blkid_partition_set_flags(par, p->boot_ind);
+ 	}
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ 
+ nothing:
+-	return 1;
++	return BLKID_PROBE_NONE;
+ err:
+-	return -1;
++	return -ENOMEM;
+ }
+ 
+ /* same as DOS */
+diff -up util-linux-2.23.2/libblkid/src/partitions/partitions.c.kzak util-linux-2.23.2/libblkid/src/partitions/partitions.c
+--- util-linux-2.23.2/libblkid/src/partitions/partitions.c.kzak	2014-03-28 15:11:18.336283724 +0100
++++ util-linux-2.23.2/libblkid/src/partitions/partitions.c	2014-03-28 15:12:28.036993622 +0100
+@@ -533,12 +533,13 @@ static int idinfo_probe(blkid_probe pr,
+ {
+ 	const struct blkid_idmag *mag = NULL;
+ 	blkid_loff_t off;
+-	int rc = 1;		/* = nothing detected */
++	int rc = BLKID_PROBE_NONE;		/* = nothing detected */
+ 
+ 	if (pr->size <= 0 || (id->minsz && id->minsz > pr->size))
+ 		goto nothing;	/* the device is too small */
+ 
+-	if (blkid_probe_get_idmag(pr, id, &off, &mag))
++	rc = blkid_probe_get_idmag(pr, id, &off, &mag);
++	if (rc != BLKID_PROBE_OK)
+ 		goto nothing;
+ 
+ 	/* final check by probing function */
+@@ -546,14 +547,15 @@ static int idinfo_probe(blkid_probe pr,
+ 		DBG(LOWPROBE, blkid_debug(
+ 			"%s: ---> call probefunc()", id->name));
+ 		rc = id->probefunc(pr, mag);
+-	        if (rc == -1) {
++		if (rc < 0) {
+ 			/* reset after error */
+ 			reset_partlist(blkid_probe_get_partlist(pr));
+ 			if (chn && !chn->binary)
+ 				blkid_probe_chain_reset_vals(pr, chn);
+-			DBG(LOWPROBE, blkid_debug("%s probefunc failed", id->name));
++			DBG(LOWPROBE, blkid_debug("%s probefunc failed, rc %d",
++						  id->name, rc));
+ 		}
+-		if (rc == 0 && mag && chn && !chn->binary)
++		if (rc == BLKID_PROBE_OK && mag && chn && !chn->binary)
+ 			rc = blkid_probe_set_magic(pr, off, mag->len,
+ 					(unsigned char *) mag->magic);
+ 
+@@ -569,11 +571,11 @@ nothing:
+  */
+ static int partitions_probe(blkid_probe pr, struct blkid_chain *chn)
+ {
+-	int rc = 1;
++	int rc = BLKID_PROBE_NONE;
+ 	size_t i;
+ 
+ 	if (!pr || chn->idx < -1)
+-		return -1;
++		return -EINVAL;
+ 	blkid_probe_chain_reset_vals(pr, chn);
+ 
+ 	if (chn->binary)
+@@ -597,7 +599,10 @@ static int partitions_probe(blkid_probe
+ 			continue;
+ 
+ 		/* apply checks from idinfo */
+-		if (idinfo_probe(pr, idinfos[i], chn) != 0)
++		rc = idinfo_probe(pr, idinfos[i], chn);
++		if (rc < 0)
++			break;
++		if (rc != BLKID_PROBE_OK)
+ 			continue;
+ 
+ 		name = idinfos[i]->name;
+@@ -613,20 +618,21 @@ static int partitions_probe(blkid_probe
+ 		break;
+ 	}
+ 
+-	if (rc == 1) {
+-		DBG(LOWPROBE, blkid_debug("<-- leaving probing loop (failed) [PARTS idx=%d]",
+-			chn->idx));
++	if (rc != BLKID_PROBE_OK) {
++		DBG(LOWPROBE, blkid_debug("<-- leaving probing loop (failed=%d) [PARTS idx=%d]",
++			rc, chn->idx));
+ 	}
+ 
+ details_only:
+ 	/*
+ 	 * Gather PART_ENTRY_* values if the current device is a partition.
+ 	 */
+-	if (!chn->binary &&
++	if ((rc == BLKID_PROBE_OK || rc == BLKID_PROBE_NONE) && !chn->binary &&
+ 	    (blkid_partitions_get_flags(pr) & BLKID_PARTS_ENTRY_DETAILS)) {
+ 
+-		if (!blkid_partitions_probe_partition(pr))
+-			rc = 0;
++		int xrc = blkid_partitions_probe_partition(pr);
++		if (xrc < 0)
++			rc = xrc;	/* optional, care about errors only */
+ 	}
+ 
+ 	return rc;
+@@ -637,7 +643,7 @@ int blkid_partitions_do_subprobe(blkid_p
+ 		const struct blkid_idinfo *id)
+ {
+ 	blkid_probe prc;
+-	int rc = 1;
++	int rc;
+ 	blkid_partlist ls;
+ 	blkid_loff_t sz, off;
+ 
+@@ -646,7 +652,7 @@ int blkid_partitions_do_subprobe(blkid_p
+ 		id->name, parent));
+ 
+ 	if (!pr || !parent || !parent->size)
+-		return -1;
++		return -EINVAL;
+ 
+ 	/* range defined by parent */
+ 	sz = ((blkid_loff_t) parent->size) << 9;
+@@ -656,13 +662,13 @@ int blkid_partitions_do_subprobe(blkid_p
+ 		DBG(LOWPROBE, blkid_debug(
+ 			"ERROR: parts: <---- '%s' subprobe: overflow detected.",
+ 			id->name));
+-		return -1;
++		return -ENOSPC;
+ 	}
+ 
+ 	/* create private prober */
+ 	prc = blkid_clone_probe(pr);
+ 	if (!prc)
+-		return -1;
++		return -ENOMEM;
+ 
+ 	blkid_probe_set_dimension(prc, off, sz);
+ 
+@@ -695,7 +701,7 @@ int blkid_partitions_do_subprobe(blkid_p
+ 
+ static int blkid_partitions_probe_partition(blkid_probe pr)
+ {
+-	int rc = 1;
++	int rc = BLKID_PROBE_NONE;
+ 	blkid_probe disk_pr = NULL;
+ 	blkid_partlist ls;
+ 	blkid_partition par;
+@@ -761,7 +767,7 @@ static int blkid_partitions_probe_partit
+ 		blkid_probe_sprintf_value(pr, "PART_ENTRY_DISK", "%u:%u",
+ 				major(disk), minor(disk));
+ 	}
+-	rc = 0;
++	rc = BLKID_PROBE_OK;
+ nothing:
+ 	return rc;
+ }
+diff -up util-linux-2.23.2/libblkid/src/partitions/sgi.c.kzak util-linux-2.23.2/libblkid/src/partitions/sgi.c
+--- util-linux-2.23.2/libblkid/src/partitions/sgi.c.kzak	2013-07-15 10:25:46.285049072 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/sgi.c	2014-03-28 15:11:44.677551986 +0100
+@@ -99,8 +99,11 @@ static int probe_sgi_pt(blkid_probe pr,
+ 	int i;
+ 
+ 	l = (struct sgi_disklabel *) blkid_probe_get_sector(pr, 0);
+-	if (!l)
++	if (!l) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	if (count_checksum(l)) {
+ 		DBG(LOWPROBE, blkid_debug(
+@@ -110,11 +113,11 @@ static int probe_sgi_pt(blkid_probe pr,
+ 
+ 	if (blkid_partitions_need_typeonly(pr))
+ 		/* caller does not ask for details about partitions */
+-		return 0;
++		return BLKID_PROBE_OK;
+ 
+ 	ls = blkid_probe_get_partlist(pr);
+ 	if (!ls)
+-		goto err;
++		goto nothing;
+ 
+ 	tab = blkid_partlist_new_parttable(ls, "sgi", 0);
+ 	if (!tab)
+@@ -138,12 +141,12 @@ static int probe_sgi_pt(blkid_probe pr,
+ 		blkid_partition_set_type(par, type);
+ 	}
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ 
+ nothing:
+-	return 1;
++	return BLKID_PROBE_NONE;
+ err:
+-	return -1;
++	return -ENOMEM;
+ }
+ 
+ const struct blkid_idinfo sgi_pt_idinfo =
+diff -up util-linux-2.23.2/libblkid/src/partitions/solaris_x86.c.kzak util-linux-2.23.2/libblkid/src/partitions/solaris_x86.c
+--- util-linux-2.23.2/libblkid/src/partitions/solaris_x86.c.kzak	2013-06-13 09:46:10.418650605 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/solaris_x86.c	2014-03-28 15:11:44.677551986 +0100
+@@ -69,8 +69,11 @@ static int probe_solaris_pt(blkid_probe
+ 	uint16_t nparts;
+ 
+ 	l = (struct solaris_vtoc *) blkid_probe_get_sector(pr, SOLARIS_SECTOR);
+-	if (!l)
++	if (!l) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	if (le32_to_cpu(l->v_version) != 1) {
+ 		DBG(LOWPROBE, blkid_debug(
+@@ -81,11 +84,11 @@ static int probe_solaris_pt(blkid_probe
+ 
+ 	if (blkid_partitions_need_typeonly(pr))
+ 		/* caller does not ask for details about partitions */
+-		return 0;
++		return BLKID_PROBE_OK;
+ 
+ 	ls = blkid_probe_get_partlist(pr);
+ 	if (!ls)
+-		goto err;
++		goto nothing;
+ 
+ 	parent = blkid_partlist_get_parent(ls);
+ 
+@@ -126,12 +129,12 @@ static int probe_solaris_pt(blkid_probe
+ 		blkid_partition_set_flags(par, le16_to_cpu(p->s_flag));
+ 	}
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ 
+ nothing:
+-	return 1;
++	return BLKID_PROBE_NONE;
+ err:
+-	return -1;
++	return -ENOMEM;
+ }
+ 
+ const struct blkid_idinfo solaris_x86_pt_idinfo =
+diff -up util-linux-2.23.2/libblkid/src/partitions/sun.c.kzak util-linux-2.23.2/libblkid/src/partitions/sun.c
+--- util-linux-2.23.2/libblkid/src/partitions/sun.c.kzak	2013-06-13 09:46:10.419650613 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/sun.c	2014-03-28 15:11:44.678551996 +0100
+@@ -27,8 +27,11 @@ static int probe_sun_pt(blkid_probe pr,
+ 	int i, use_vtoc;
+ 
+ 	l = (struct sun_disklabel *) blkid_probe_get_sector(pr, 0);
+-	if (!l)
++	if (!l) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	if (sun_pt_checksum(l)) {
+ 		DBG(LOWPROBE, blkid_debug(
+@@ -38,11 +41,11 @@ static int probe_sun_pt(blkid_probe pr,
+ 
+ 	if (blkid_partitions_need_typeonly(pr))
+ 		/* caller does not ask for details about partitions */
+-		return 0;
++		return BLKID_PROBE_OK;
+ 
+ 	ls = blkid_probe_get_partlist(pr);
+ 	if (!ls)
+-		goto err;
++		goto nothing;
+ 
+ 	tab = blkid_partlist_new_parttable(ls, "sun", 0);
+ 	if (!tab)
+@@ -76,7 +79,7 @@ static int probe_sun_pt(blkid_probe pr,
+ 		uint16_t type = 0, flags = 0;
+ 		blkid_partition par;
+ 
+-                start = be32_to_cpu(p->start_cylinder) * spc;
++		start = be32_to_cpu(p->start_cylinder) * spc;
+ 		size = be32_to_cpu(p->num_sectors);
+ 		if (use_vtoc) {
+ 			type = be16_to_cpu(l->vtoc.infos[i].id);
+@@ -96,12 +99,12 @@ static int probe_sun_pt(blkid_probe pr,
+ 		if (flags)
+ 			blkid_partition_set_flags(par, flags);
+ 	}
+-	return 0;
++	return BLKID_PROBE_OK;
+ 
+ nothing:
+-	return 1;
++	return BLKID_PROBE_NONE;
+ err:
+-	return -1;
++	return -ENOMEM;
+ }
+ 
+ 
+diff -up util-linux-2.23.2/libblkid/src/partitions/ultrix.c.kzak util-linux-2.23.2/libblkid/src/partitions/ultrix.c
+--- util-linux-2.23.2/libblkid/src/partitions/ultrix.c.kzak	2013-05-30 15:21:43.127591380 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/ultrix.c	2014-03-28 15:11:44.678551996 +0100
+@@ -44,8 +44,11 @@ static int probe_ultrix_pt(blkid_probe p
+ 	int i;
+ 
+ 	data = blkid_probe_get_sector(pr, ULTRIX_SECTOR);
+-	if (!data)
++	if (!data) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	l = (struct ultrix_disklabel *) (data + ULTRIX_OFFSET);
+ 
+@@ -59,11 +62,11 @@ static int probe_ultrix_pt(blkid_probe p
+ 
+ 	if (blkid_partitions_need_typeonly(pr))
+ 		/* caller does not ask for details about partitions */
+-		return 0;
++		return BLKID_PROBE_OK;
+ 
+ 	ls = blkid_probe_get_partlist(pr);
+ 	if (!ls)
+-		goto err;
++		goto nothing;
+ 
+ 	tab = blkid_partlist_new_parttable(ls, "ultrix", 0);
+ 	if (!tab)
+@@ -80,11 +83,11 @@ static int probe_ultrix_pt(blkid_probe p
+ 		}
+ 	}
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ nothing:
+-	return 1;
++	return BLKID_PROBE_NONE;
+ err:
+-	return -1;
++	return -ENOMEM;
+ }
+ 
+ const struct blkid_idinfo ultrix_pt_idinfo =
+diff -up util-linux-2.23.2/libblkid/src/partitions/unixware.c.kzak util-linux-2.23.2/libblkid/src/partitions/unixware.c
+--- util-linux-2.23.2/libblkid/src/partitions/unixware.c.kzak	2013-06-13 09:46:10.419650613 +0200
++++ util-linux-2.23.2/libblkid/src/partitions/unixware.c	2014-03-28 15:11:44.678551996 +0100
+@@ -106,19 +106,22 @@ static int probe_unixware_pt(blkid_probe
+ 
+ 	l = (struct unixware_disklabel *)
+ 			blkid_probe_get_sector(pr, UNIXWARE_SECTOR);
+-	if (!l)
++	if (!l) {
++		if (errno)
++			return -errno;
+ 		goto nothing;
++	}
+ 
+ 	if (le32_to_cpu(l->vtoc.v_magic) != UNIXWARE_VTOCMAGIC)
+ 		goto nothing;
+ 
+ 	if (blkid_partitions_need_typeonly(pr))
+ 		/* caller does not ask for details about partitions */
+-		return 0;
++		return BLKID_PROBE_OK;
+ 
+ 	ls = blkid_probe_get_partlist(pr);
+ 	if (!ls)
+-		goto err;
++		goto nothing;
+ 
+ 	parent = blkid_partlist_get_parent(ls);
+ 
+@@ -161,12 +164,12 @@ static int probe_unixware_pt(blkid_probe
+ 		blkid_partition_set_flags(par, flg);
+ 	}
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ 
+ nothing:
+-	return 1;
++	return BLKID_PROBE_NONE;
+ err:
+-	return -1;
++	return -ENOMEM;
+ }
+ 
+ 
+diff -up util-linux-2.23.2/libblkid/src/probe.c.kzak util-linux-2.23.2/libblkid/src/probe.c
+--- util-linux-2.23.2/libblkid/src/probe.c.kzak	2014-03-28 15:11:18.334283704 +0100
++++ util-linux-2.23.2/libblkid/src/probe.c	2014-03-28 15:11:44.678551996 +0100
+@@ -559,13 +559,17 @@ unsigned char *blkid_probe_get_buffer(bl
+ 	if (!bf) {
+ 		ssize_t ret;
+ 
+-		if (blkid_llseek(pr->fd, pr->off + off, SEEK_SET) < 0)
++		if (blkid_llseek(pr->fd, pr->off + off, SEEK_SET) < 0) {
++			errno = 0;
+ 			return NULL;
++		}
+ 
+ 		/* allocate info and space for data by why call */
+ 		bf = calloc(1, sizeof(struct blkid_bufinfo) + len);
+-		if (!bf)
++		if (!bf) {
++			errno = ENOMEM;
+ 			return NULL;
++		}
+ 
+ 		bf->data = ((unsigned char *) bf) + sizeof(struct blkid_bufinfo);
+ 		bf->len = len;
+@@ -577,7 +581,10 @@ unsigned char *blkid_probe_get_buffer(bl
+ 
+ 		ret = read(pr->fd, bf->data, len);
+ 		if (ret != (ssize_t) len) {
++			DBG(LOWPROBE, blkid_debug("\tbuffer read: return %zd error %m", ret));
+ 			free(bf);
++			if (ret >= 0)
++				errno = 0;
+ 			return NULL;
+ 		}
+ 		list_add_tail(&bf->bufs, &pr->buffers);
+@@ -766,6 +773,17 @@ int blkid_probe_set_dimension(blkid_prob
+ 	return 0;
+ }
+ 
++/**
++ * blkid_probe_get_idmag:
++ * @pr: probe
++ * @id: id information
++ * @offset: begin of probing area
++ * @res: found id information
++ *
++ * Check for matching magic value.
++ * Returns BLKID_PROBE_OK if found, BLKID_PROBE_NONE if not found
++ * or no magic present, or negative value on error.
++ */
+ int blkid_probe_get_idmag(blkid_probe pr, const struct blkid_idinfo *id,
+ 			blkid_loff_t *offset, const struct blkid_idmag **res)
+ {
+@@ -784,6 +802,8 @@ int blkid_probe_get_idmag(blkid_probe pr
+ 		off = (mag->kboff + (mag->sboff >> 10)) << 10;
+ 		buf = blkid_probe_get_buffer(pr, off, 1024);
+ 
++		if (!buf && errno)
++			return -errno;
+ 		if (buf && !memcmp(mag->magic,
+ 				buf + (mag->sboff & 0x3ff), mag->len)) {
+ 			DBG(LOWPROBE, blkid_debug("\tmagic sboff=%u, kboff=%ld",
+@@ -792,16 +812,16 @@ int blkid_probe_get_idmag(blkid_probe pr
+ 				*offset = off + (mag->sboff & 0x3ff);
+ 			if (res)
+ 				*res = mag;
+-			return 0;
++			return BLKID_PROBE_OK;
+ 		}
+ 		mag++;
+ 	}
+ 
+ 	if (id && id->magics[0].magic)
+ 		/* magic string(s) defined, but not found */
+-		return 1;
++		return BLKID_PROBE_NONE;
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ }
+ 
+ static inline void blkid_probe_start(blkid_probe pr)
+diff -up util-linux-2.23.2/libblkid/src/superblocks/adaptec_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/adaptec_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/adaptec_raid.c.kzak	2013-04-08 17:55:40.232855970 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/adaptec_raid.c	2014-03-28 15:11:44.678551996 +0100
+@@ -80,10 +80,10 @@ static int probe_adraid(blkid_probe pr,
+ 	struct adaptec_metadata *ad;
+ 
+ 	if (pr->size < 0x10000)
+-		return -1;
++		return BLKID_PROBE_NONE;
+ 
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return BLKID_PROBE_NONE;
+ 
+ 	off = ((pr->size / 0x200)-1) * 0x200;
+ 	ad = (struct adaptec_metadata *)
+@@ -91,17 +91,19 @@ static int probe_adraid(blkid_probe pr,
+ 					off,
+ 					sizeof(struct adaptec_metadata));
+ 	if (!ad)
+-		return -1;
++		return errno ? -errno : BLKID_PROBE_NONE;;
++
+ 	if (ad->smagic != be32_to_cpu(AD_SIGNATURE))
+-		return -1;
++		return BLKID_PROBE_NONE;
+ 	if (ad->b0idcode != be32_to_cpu(AD_MAGIC))
+-		return -1;
++		return BLKID_PROBE_NONE;
+ 	if (blkid_probe_sprintf_version(pr, "%u", ad->resver) != 0)
+-		return -1;
++		return BLKID_PROBE_NONE;
+ 	if (blkid_probe_set_magic(pr, off, sizeof(ad->b0idcode),
+ 				(unsigned char *) &ad->b0idcode))
+-		return -1;
+-	return 0;
++		return BLKID_PROBE_NONE;
++
++	return BLKID_PROBE_OK;
+ }
+ 
+ const struct blkid_idinfo adraid_idinfo = {
+diff -up util-linux-2.23.2/libblkid/src/superblocks/befs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/befs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/befs.c.kzak	2013-04-08 17:55:40.237856017 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/befs.c	2014-03-28 15:11:44.679552006 +0100
+@@ -261,21 +261,23 @@ static int64_t get_key_value(blkid_probe
+ 	int64_t node_pointer;
+ 	int32_t first, last, mid, cmp;
+ 
++	errno = 0;
+ 	bh = (struct bplustree_header *) get_tree_node(pr, bs, &bi->data, 0,
+ 					sizeof(struct bplustree_header), fs_le);
+ 	if (!bh)
+-		return -1;
++		return errno ? -errno : -ENOENT;
+ 
+ 	if ((int32_t) FS32_TO_CPU(bh->magic, fs_le) != BPLUSTREE_MAGIC)
+-		return -1;
++		return -ENOENT;
+ 
+ 	node_pointer = FS64_TO_CPU(bh->root_node_pointer, fs_le);
+ 
+ 	do {
++		errno = 0;
+ 		bn = (struct bplustree_node *) get_tree_node(pr, bs, &bi->data,
+ 			node_pointer, FS32_TO_CPU(bh->node_size, fs_le), fs_le);
+ 		if (!bn)
+-			return -1;
++			return errno ? -errno : -ENOENT;
+ 
+ 		keylengths = (uint16_t *) ((uint8_t *) bn
+ 				+ ((sizeof(struct bplustree_node)
+@@ -336,10 +338,10 @@ static int get_uuid(blkid_probe pr, cons
+ 
+ 	bi = (struct befs_inode *) get_block_run(pr, bs, &bs->root_dir, fs_le);
+ 	if (!bi)
+-		return -1;
++		return errno ? -errno : BLKID_PROBE_NONE;
+ 
+ 	if (FS32_TO_CPU(bi->magic1, fs_le) != INODE_MAGIC1)
+-		return -1;
++		return BLKID_PROBE_NONE;
+ 
+ 	sd = (struct small_data *) bi->small_data;
+ 
+@@ -376,24 +378,24 @@ static int get_uuid(blkid_probe pr, cons
+ 		bi = (struct befs_inode *) get_block_run(pr, bs,
+ 							&bi->attributes, fs_le);
+ 		if (!bi)
+-			return -1;
++			return errno ? -errno : BLKID_PROBE_NONE;
+ 
+ 		if (FS32_TO_CPU(bi->magic1, fs_le) != INODE_MAGIC1)
+-			return -1;
++			return BLKID_PROBE_NONE;
+ 
+ 		value = get_key_value(pr, bs, bi, KEY_NAME, fs_le);
+-
+ 		if (value < 0)
+-			return value;
++			return value == -ENOENT ? BLKID_PROBE_NONE : value;
++
+ 		else if (value > 0) {
+ 			bi = (struct befs_inode *) blkid_probe_get_buffer(pr,
+ 				value << FS32_TO_CPU(bs->block_shift, fs_le),
+ 				FS32_TO_CPU(bs->block_size, fs_le));
+ 			if (!bi)
+-				return -1;
++				return errno ? -errno : BLKID_PROBE_NONE;
+ 
+ 			if (FS32_TO_CPU(bi->magic1, fs_le) != INODE_MAGIC1)
+-				return -1;
++				return 1;
+ 
+ 			if (FS32_TO_CPU(bi->type, fs_le) == B_UINT64_TYPE
+ 				&& FS64_TO_CPU(bi->data.size, fs_le) == KEY_SIZE
+@@ -404,7 +406,7 @@ static int get_uuid(blkid_probe pr, cons
+ 				attr_data = (uint64_t *) get_block_run(pr, bs,
+ 						&bi->data.direct[0], fs_le);
+ 				if (!attr_data)
+-					return -1;
++					return errno ? -errno : BLKID_PROBE_NONE;
+ 
+ 				*uuid = *attr_data;
+ 			}
+@@ -424,7 +426,7 @@ static int probe_befs(blkid_probe pr, co
+ 					mag->sboff - B_OS_NAME_LENGTH,
+ 					sizeof(struct befs_super_block));
+ 	if (!bs)
+-		return -1;
++		return errno ? -errno : BLKID_PROBE_NONE;
+ 
+ 	if (le32_to_cpu(bs->magic1) == SUPER_BLOCK_MAGIC1
+ 		&& le32_to_cpu(bs->magic2) == SUPER_BLOCK_MAGIC2
+@@ -439,11 +441,11 @@ static int probe_befs(blkid_probe pr, co
+ 		fs_le = 0;
+ 		version = "big-endian";
+ 	} else
+-		return -1;
++		return BLKID_PROBE_NONE;
+ 
+ 	ret = get_uuid(pr, bs, &volume_id, fs_le);
+ 
+-	if (ret < 0)
++	if (ret != 0)
+ 		return ret;
+ 
+ 	/*
+@@ -459,7 +461,7 @@ static int probe_befs(blkid_probe pr, co
+ 		blkid_probe_sprintf_uuid(pr, (unsigned char *) &volume_id,
+ 					sizeof(volume_id), "%016" PRIx64,
+ 					FS64_TO_CPU(volume_id, fs_le));
+-	return 0;
++	return BLKID_PROBE_OK;
+ }
+ 
+ const struct blkid_idinfo befs_idinfo =
+diff -up util-linux-2.23.2/libblkid/src/superblocks/btrfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/btrfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/btrfs.c.kzak	2014-03-28 15:11:18.335283714 +0100
++++ util-linux-2.23.2/libblkid/src/superblocks/btrfs.c	2014-03-28 15:11:44.679552006 +0100
+@@ -65,7 +65,7 @@ static int probe_btrfs(blkid_probe pr, c
+ 
+ 	bfs = blkid_probe_get_sb(pr, mag, struct btrfs_super_block);
+ 	if (!bfs)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (*bfs->label)
+ 		blkid_probe_set_label(pr,
+diff -up util-linux-2.23.2/libblkid/src/superblocks/cramfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/cramfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/cramfs.c.kzak	2013-04-08 17:55:40.240856046 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/cramfs.c	2014-03-28 15:11:44.679552006 +0100
+@@ -40,7 +40,7 @@ static int probe_cramfs(blkid_probe pr,
+ 
+ 	cs = blkid_probe_get_sb(pr, mag, struct cramfs_super);
+ 	if (!cs)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_set_label(pr, cs->name, sizeof(cs->name));
+ 	return 0;
+diff -up util-linux-2.23.2/libblkid/src/superblocks/ddf_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/ddf_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/ddf_raid.c.kzak	2013-04-08 17:55:40.241856056 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/ddf_raid.c	2014-03-28 15:11:44.679552006 +0100
+@@ -81,7 +81,7 @@ static int probe_ddf(blkid_probe pr,
+ 	uint64_t off, lba;
+ 
+ 	if (pr->size < 0x30000)
+-		return -1;
++		return 1;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(hdrs); i++) {
+ 		off = ((pr->size / 0x200) - hdrs[i]) * 0x200;
+@@ -90,8 +90,7 @@ static int probe_ddf(blkid_probe pr,
+ 					off,
+ 					sizeof(struct ddf_header));
+ 		if (!ddf)
+-			return -1;
+-
++			return errno ? -errno : 1;
+ 		if (ddf->signature == cpu_to_be32(DDF_MAGIC) ||
+ 		    ddf->signature == cpu_to_le32(DDF_MAGIC))
+ 			break;
+@@ -99,7 +98,7 @@ static int probe_ddf(blkid_probe pr,
+ 	}
+ 
+ 	if (!ddf)
+-		return -1;
++		return 1;
+ 
+ 	lba = ddf->signature == cpu_to_be32(DDF_MAGIC) ?
+ 			be64_to_cpu(ddf->primary_lba) :
+@@ -111,8 +110,12 @@ static int probe_ddf(blkid_probe pr,
+ 
+ 		buf = blkid_probe_get_buffer(pr,
+ 					lba << 9, sizeof(ddf->signature));
+-		if (!buf || memcmp(buf, &ddf->signature, 4))
+-			return -1;
++		if (!buf) {
++			if (errno)
++				return -errno;
++			if (memcmp(buf, &ddf->signature, 4))
++				return 1;
++		}
+ 	}
+ 
+ 	blkid_probe_strncpy_uuid(pr, ddf->guid, sizeof(ddf->guid));
+@@ -121,11 +124,11 @@ static int probe_ddf(blkid_probe pr,
+ 	*(version + sizeof(ddf->ddf_rev)) = '\0';
+ 
+ 	if (blkid_probe_set_version(pr, version) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_magic(pr, off,
+ 			sizeof(ddf->signature),
+ 			(unsigned char *) &ddf->signature))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/drbd.c.kzak util-linux-2.23.2/libblkid/src/superblocks/drbd.c
+--- util-linux-2.23.2/libblkid/src/superblocks/drbd.c.kzak	2013-04-08 17:55:40.243856074 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/drbd.c	2014-03-28 15:11:44.679552006 +0100
+@@ -75,18 +75,18 @@ static int probe_drbd(blkid_probe pr,
+ 
+ 	/* Small devices cannot be drbd (?) */
+ 	if (pr->size < 0x10000)
+-		return -1;
++		return 1;
+ 
+ 	md = (struct md_on_disk_08 *)
+ 			blkid_probe_get_buffer(pr,
+ 					off,
+ 					sizeof(struct md_on_disk_08));
+ 	if (!md)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (be32_to_cpu(md->magic) != DRBD_MD_MAGIC_08 &&
+ 			be32_to_cpu(md->magic) != DRBD_MD_MAGIC_84_UNCLEAN)
+-		return -1;
++		return 1;
+ 
+ 	/*
+ 	 * DRBD does not have "real" uuids; the following resembles DRBD's
+@@ -102,7 +102,7 @@ static int probe_drbd(blkid_probe pr,
+ 				off + offsetof(struct md_on_disk_08, magic),
+ 				sizeof(md->magic),
+ 				(unsigned char *) &md->magic))
+-		return -1;
++		return 1;
+ 
+ 	return 0;
+ }
+diff -up util-linux-2.23.2/libblkid/src/superblocks/drbdproxy_datalog.c.kzak util-linux-2.23.2/libblkid/src/superblocks/drbdproxy_datalog.c
+--- util-linux-2.23.2/libblkid/src/superblocks/drbdproxy_datalog.c.kzak	2013-04-08 17:55:40.244856084 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/drbdproxy_datalog.c	2014-03-28 15:11:44.679552006 +0100
+@@ -33,7 +33,7 @@ static int probe_drbdproxy_datalog(blkid
+ 
+ 	lh = (struct log_header_t *) blkid_probe_get_buffer(pr, 0, sizeof(*lh));
+ 	if (!lh)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_set_uuid(pr, lh->uuid);
+ 	blkid_probe_sprintf_version(pr, "v%jd", le64_to_cpu(lh->version));
+diff -up util-linux-2.23.2/libblkid/src/superblocks/exfat.c.kzak util-linux-2.23.2/libblkid/src/superblocks/exfat.c
+--- util-linux-2.23.2/libblkid/src/superblocks/exfat.c.kzak	2013-04-08 17:55:40.245856093 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/exfat.c	2014-03-28 15:11:44.680552016 +0100
+@@ -115,12 +115,14 @@ static int probe_exfat(blkid_probe pr, c
+ 
+ 	sb = blkid_probe_get_sb(pr, mag, struct exfat_super_block);
+ 	if (!sb)
+-		return -1;
++		return errno ? -errno : BLKID_PROBE_NONE;
+ 
+ 	label = find_label(pr, sb);
+ 	if (label)
+ 		blkid_probe_set_utf8label(pr, label->name,
+ 				min(label->length * 2, 30), BLKID_ENC_UTF16LE);
++	else if (errno)
++		return -errno;
+ 
+ 	blkid_probe_sprintf_uuid(pr, sb->volume_serial, 4,
+ 			"%02hhX%02hhX-%02hhX%02hhX",
+@@ -130,7 +132,7 @@ static int probe_exfat(blkid_probe pr, c
+ 	blkid_probe_sprintf_version(pr, "%u.%u",
+ 			sb->version.major, sb->version.minor);
+ 
+-	return 0;
++	return BLKID_PROBE_OK;
+ }
+ 
+ const struct blkid_idinfo exfat_idinfo =
+diff -up util-linux-2.23.2/libblkid/src/superblocks/ext.c.kzak util-linux-2.23.2/libblkid/src/superblocks/ext.c
+--- util-linux-2.23.2/libblkid/src/superblocks/ext.c.kzak	2014-03-28 15:11:18.333283694 +0100
++++ util-linux-2.23.2/libblkid/src/superblocks/ext.c	2014-03-28 15:11:44.680552016 +0100
+@@ -198,9 +198,9 @@ static int probe_jbd(blkid_probe pr,
+ 
+ 	es = ext_get_super(pr, NULL, &fi, NULL);
+ 	if (!es)
+-		return -BLKID_ERR_PARAM;
++		return errno ? -errno : 1;
+ 	if (!(fi & EXT3_FEATURE_INCOMPAT_JOURNAL_DEV))
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	ext_get_info(pr, 2, es);
+ 	return 0;
+@@ -214,16 +214,16 @@ static int probe_ext2(blkid_probe pr,
+ 
+ 	es = ext_get_super(pr, &fc, &fi, &frc);
+ 	if (!es)
+-		return -BLKID_ERR_PARAM;
++		return errno ? -errno : 1;
+ 
+ 	/* Distinguish between ext3 and ext2 */
+ 	if (fc & EXT3_FEATURE_COMPAT_HAS_JOURNAL)
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	/* Any features which ext2 doesn't understand */
+ 	if ((frc & EXT2_FEATURE_RO_COMPAT_UNSUPPORTED) ||
+ 	    (fi  & EXT2_FEATURE_INCOMPAT_UNSUPPORTED))
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	ext_get_info(pr, 2, es);
+ 	return 0;
+@@ -237,16 +237,16 @@ static int probe_ext3(blkid_probe pr,
+ 
+ 	es = ext_get_super(pr, &fc, &fi, &frc);
+ 	if (!es)
+-		return -BLKID_ERR_PARAM;
++		return errno ? -errno : 1;
+ 
+ 	/* ext3 requires journal */
+ 	if (!(fc & EXT3_FEATURE_COMPAT_HAS_JOURNAL))
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	/* Any features which ext3 doesn't understand */
+ 	if ((frc & EXT3_FEATURE_RO_COMPAT_UNSUPPORTED) ||
+ 	    (fi  & EXT3_FEATURE_INCOMPAT_UNSUPPORTED))
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	ext_get_info(pr, 3, es);
+ 	return 0;
+@@ -261,14 +261,14 @@ static int probe_ext4dev(blkid_probe pr,
+ 
+ 	es = ext_get_super(pr, &fc, &fi, &frc);
+ 	if (!es)
+-		return -BLKID_ERR_PARAM;
++		return errno ? -errno : 1;
+ 
+ 	/* Distinguish from jbd */
+ 	if (fi & EXT3_FEATURE_INCOMPAT_JOURNAL_DEV)
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	if (!(le32_to_cpu(es->s_flags) & EXT2_FLAGS_TEST_FILESYS))
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	ext_get_info(pr, 4, es);
+ 	return 0;
+@@ -282,16 +282,16 @@ static int probe_ext4(blkid_probe pr,
+ 
+ 	es = ext_get_super(pr, &fc, &fi, &frc);
+ 	if (!es)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	/* Distinguish from jbd */
+ 	if (fi & EXT3_FEATURE_INCOMPAT_JOURNAL_DEV)
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	/* Ext4 has at least one feature which ext3 doesn't understand */
+ 	if (!(frc & EXT3_FEATURE_RO_COMPAT_UNSUPPORTED) &&
+ 	    !(fi  & EXT3_FEATURE_INCOMPAT_UNSUPPORTED))
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	/*
+ 	 * If the filesystem is a OK for use by in-development
+@@ -304,7 +304,7 @@ static int probe_ext4(blkid_probe pr,
+ 	 * ext4dev.
+ 	 */
+ 	if (le32_to_cpu(es->s_flags) & EXT2_FLAGS_TEST_FILESYS)
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	ext_get_info(pr, 4, es);
+ 	return 0;
+diff -up util-linux-2.23.2/libblkid/src/superblocks/f2fs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/f2fs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/f2fs.c.kzak	2013-06-13 09:46:10.422650639 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/f2fs.c	2014-03-28 15:11:44.680552016 +0100
+@@ -62,7 +62,7 @@ static int probe_f2fs(blkid_probe pr, co
+ 
+ 	sb = blkid_probe_get_sb(pr, mag, struct f2fs_super_block);
+ 	if (!sb)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	major = le16_to_cpu(sb->major_ver);
+ 	minor = le16_to_cpu(sb->minor_ver);
+diff -up util-linux-2.23.2/libblkid/src/superblocks/gfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/gfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/gfs.c.kzak	2013-04-08 17:55:40.250856141 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/gfs.c	2014-03-28 15:11:44.680552016 +0100
+@@ -64,7 +64,7 @@ static int probe_gfs(blkid_probe pr, con
+ 
+ 	sbd = blkid_probe_get_sb(pr, mag, struct gfs2_sb);
+ 	if (!sbd)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (be32_to_cpu(sbd->sb_fs_format) == GFS_FORMAT_FS &&
+ 	    be32_to_cpu(sbd->sb_multihost_format) == GFS_FORMAT_MULTI)
+@@ -78,7 +78,7 @@ static int probe_gfs(blkid_probe pr, con
+ 		return 0;
+ 	}
+ 
+-	return -1;
++	return 1;
+ }
+ 
+ static int probe_gfs2(blkid_probe pr, const struct blkid_idmag *mag)
+@@ -87,7 +87,7 @@ static int probe_gfs2(blkid_probe pr, co
+ 
+ 	sbd = blkid_probe_get_sb(pr, mag, struct gfs2_sb);
+ 	if (!sbd)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (be32_to_cpu(sbd->sb_fs_format) == GFS2_FORMAT_FS &&
+ 	    be32_to_cpu(sbd->sb_multihost_format) == GFS2_FORMAT_MULTI)
+@@ -100,7 +100,7 @@ static int probe_gfs2(blkid_probe pr, co
+ 		blkid_probe_set_version(pr, "1");
+ 		return 0;
+ 	}
+-	return -1;
++	return 1;
+ }
+ 
+ const struct blkid_idinfo gfs_idinfo =
+diff -up util-linux-2.23.2/libblkid/src/superblocks/hfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/hfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/hfs.c.kzak	2013-04-08 17:55:40.251856150 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/hfs.c	2014-03-28 15:11:44.680552016 +0100
+@@ -154,7 +154,7 @@ static int probe_hfs(blkid_probe pr, con
+ 
+ 	hfs = blkid_probe_get_sb(pr, mag, struct hfs_mdb);
+ 	if (!hfs)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if ((memcmp(hfs->embed_sig, "H+", 2) == 0) ||
+ 	    (memcmp(hfs->embed_sig, "HX", 2) == 0))
+@@ -193,7 +193,7 @@ static int probe_hfsplus(blkid_probe pr,
+ 
+ 	sbd = blkid_probe_get_sb(pr, mag, struct hfs_mdb);
+ 	if (!sbd)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	/* Check for a HFS+ volume embedded in a HFS volume */
+ 	if (memcmp(sbd->signature, "BD", 2) == 0) {
+@@ -218,7 +218,7 @@ static int probe_hfsplus(blkid_probe pr,
+ 				struct hfsplus_vol_header);
+ 
+ 	if (!hfsplus)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if ((memcmp(hfsplus->signature, "H+", 2) != 0) &&
+ 	    (memcmp(hfsplus->signature, "HX", 2) != 0))
+@@ -228,7 +228,7 @@ static int probe_hfsplus(blkid_probe pr,
+ 
+ 	blocksize = be32_to_cpu(hfsplus->blocksize);
+ 	if (blocksize < HFSPLUS_SECTOR_SIZE)
+-		return -1;
++		return 1;
+ 
+ 	memcpy(extents, hfsplus->cat_file.extents, sizeof(extents));
+ 	cat_block = be32_to_cpu(extents[0].start_block);
+@@ -236,7 +236,7 @@ static int probe_hfsplus(blkid_probe pr,
+ 	buf = blkid_probe_get_buffer(pr,
+ 			off + ((blkid_loff_t) cat_block * blocksize), 0x2000);
+ 	if (!buf)
+-		return 0;
++		return errno ? -errno : 0;
+ 
+ 	bnode = (struct hfsplus_bheader_record *)
+ 		&buf[sizeof(struct hfsplus_bnode_descriptor)];
+@@ -271,7 +271,7 @@ static int probe_hfsplus(blkid_probe pr,
+ 				(blkid_loff_t) off + leaf_off,
+ 				leaf_node_size);
+ 	if (!buf)
+-		return 0;
++		return errno ? -errno : 0;
+ 
+ 	descr = (struct hfsplus_bnode_descriptor *) buf;
+ 	record_count = be16_to_cpu(descr->num_recs);
+diff -up util-linux-2.23.2/libblkid/src/superblocks/highpoint_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/highpoint_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/highpoint_raid.c.kzak	2013-04-08 17:55:40.251856150 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/highpoint_raid.c	2014-03-28 15:11:44.680552016 +0100
+@@ -30,9 +30,9 @@ static int probe_highpoint45x(blkid_prob
+ 	uint32_t magic;
+ 
+ 	if (pr->size < 0x10000)
+-		return -1;
++		return 1;
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return 1;
+ 
+ 	off = ((pr->size / 0x200) - 11) * 0x200;
+ 	hpt = (struct hpt45x_metadata *)
+@@ -40,13 +40,13 @@ static int probe_highpoint45x(blkid_prob
+ 					off,
+ 					sizeof(struct hpt45x_metadata));
+ 	if (!hpt)
+-		return -1;
++		return errno ? -errno : 1;
+ 	magic = le32_to_cpu(hpt->magic);
+ 	if (magic != HPT45X_MAGIC_OK && magic != HPT45X_MAGIC_BAD)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_magic(pr, off, sizeof(hpt->magic),
+ 				(unsigned char *) &hpt->magic))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+@@ -54,7 +54,7 @@ static int probe_highpoint37x(blkid_prob
+ 		const struct blkid_idmag *mag __attribute__((__unused__)))
+ {
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/hpfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/hpfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/hpfs.c.kzak	2013-04-08 17:55:40.252856159 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/hpfs.c	2014-03-28 15:11:44.680552016 +0100
+@@ -68,7 +68,7 @@ static int probe_hpfs(blkid_probe pr, co
+ 	/* super block */
+ 	hs = blkid_probe_get_sb(pr, mag, struct hpfs_super_block);
+ 	if (!hs)
+-		return -1;
++		return errno ? -errno : 1;
+ 	version = hs->version;
+ 
+ 	/* spare super block */
+@@ -77,9 +77,9 @@ static int probe_hpfs(blkid_probe pr, co
+ 				HPFS_SBSPARE_OFFSET,
+ 				sizeof(struct hpfs_spare_super));
+ 	if (!hss)
+-		return -1;
++		return errno ? -errno : 1;
+ 	if (memcmp(hss->magic, "\x49\x18\x91\xf9", 4) != 0)
+-		return -1;
++		return 1;
+ 
+ 	/* boot block (with UUID and LABEL) */
+ 	hbb = (struct hpfs_boot_block *)
+@@ -87,7 +87,7 @@ static int probe_hpfs(blkid_probe pr, co
+ 				0,
+ 				sizeof(struct hpfs_boot_block));
+ 	if (!hbb)
+-		return -1;
++		return errno ? -errno : 1;
+ 	if (memcmp(hbb->magic, "\x55\xaa", 2) == 0 &&
+ 	    memcmp(hbb->sig_hpfs, "HPFS", 4) == 0 &&
+ 	    hbb->sig_28h == 0x28) {
+diff -up util-linux-2.23.2/libblkid/src/superblocks/iso9660.c.kzak util-linux-2.23.2/libblkid/src/superblocks/iso9660.c
+--- util-linux-2.23.2/libblkid/src/superblocks/iso9660.c.kzak	2013-06-13 09:46:10.422650639 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/iso9660.c	2014-03-28 15:11:44.680552016 +0100
+@@ -100,7 +100,7 @@ static int probe_iso9660_hsfs(blkid_prob
+ 
+ 	iso = blkid_probe_get_sb(pr, mag, struct high_sierra_volume_descriptor);
+ 	if (!iso)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_set_version(pr, "High Sierra");
+ 	blkid_probe_set_label(pr, iso->volume_id, sizeof(iso->volume_id));
+@@ -178,7 +178,7 @@ int probe_iso9660(blkid_probe pr, const
+ 
+ 	iso = blkid_probe_get_sb(pr, mag, struct iso_volume_descriptor);
+ 	if (!iso)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	memcpy(label, iso->volume_id, sizeof(label));
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/isw_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/isw_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/isw_raid.c.kzak	2013-04-08 17:55:40.252856159 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/isw_raid.c	2014-03-28 15:11:44.680552016 +0100
+@@ -33,9 +33,9 @@ static int probe_iswraid(blkid_probe pr,
+ 	struct isw_metadata *isw;
+ 
+ 	if (pr->size < 0x10000)
+-		return -1;
++		return 1;
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return 1;
+ 
+ 	off = ((pr->size / 0x200) - 2) * 0x200;
+ 	isw = (struct isw_metadata *)
+@@ -43,15 +43,16 @@ static int probe_iswraid(blkid_probe pr,
+ 					off,
+ 					sizeof(struct isw_metadata));
+ 	if (!isw)
+-		return -1;
++		return errno ? -errno : 1;
++
+ 	if (memcmp(isw->sig, ISW_SIGNATURE, sizeof(ISW_SIGNATURE)-1) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_sprintf_version(pr, "%6s",
+ 			&isw->sig[sizeof(ISW_SIGNATURE)-1]) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_magic(pr, off, sizeof(isw->sig),
+ 				(unsigned char *) isw->sig))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/jfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/jfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/jfs.c.kzak	2013-04-08 17:55:40.253856169 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/jfs.c	2014-03-28 15:11:44.681552026 +0100
+@@ -40,7 +40,7 @@ static int probe_jfs(blkid_probe pr, con
+ 
+ 	js = blkid_probe_get_sb(pr, mag, struct jfs_super_block);
+ 	if (!js)
+-		return -1;
++		return errno ? -errno : 1;
+ 	if (le32_to_cpu(js->js_bsize) != (1U << le16_to_cpu(js->js_l2bsize)))
+ 		return 1;
+ 	if (le32_to_cpu(js->js_pbsize) != (1U << le16_to_cpu(js->js_l2pbsize)))
+diff -up util-linux-2.23.2/libblkid/src/superblocks/jmicron_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/jmicron_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/jmicron_raid.c.kzak	2013-04-08 17:55:40.253856169 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/jmicron_raid.c	2014-03-28 15:11:44.681552026 +0100
+@@ -32,9 +32,9 @@ static int probe_jmraid(blkid_probe pr,
+ 	struct jm_metadata *jm;
+ 
+ 	if (pr->size < 0x10000)
+-		return -1;
++		return 1;
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return 1;
+ 
+ 	off = ((pr->size / 0x200) - 1) * 0x200;
+ 	jm = (struct jm_metadata *)
+@@ -42,15 +42,16 @@ static int probe_jmraid(blkid_probe pr,
+ 				off,
+ 				sizeof(struct jm_metadata));
+ 	if (!jm)
+-		return -1;
++		return errno ? -errno : 1;
++
+ 	if (memcmp(jm->signature, JM_SIGNATURE, sizeof(JM_SIGNATURE) - 1) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_sprintf_version(pr, "%u.%u",
+ 				jm->major_version, jm->minor_version) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_magic(pr, off, sizeof(jm->signature),
+ 				(unsigned char *) jm->signature))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/linux_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/linux_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/linux_raid.c.kzak	2013-04-08 17:55:40.253856169 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/linux_raid.c	2014-03-28 15:11:44.681552026 +0100
+@@ -110,13 +110,13 @@ static int probe_raid0(blkid_probe pr, b
+ 	uint64_t size;
+ 
+ 	if (pr->size < MD_RESERVED_BYTES)
+-		return -1;
++		return 1;
+ 	mdp0 = (struct mdp0_super_block *)
+ 			blkid_probe_get_buffer(pr,
+ 				off,
+ 				sizeof(struct mdp0_super_block));
+ 	if (!mdp0)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	memset(uuid.ints, 0, sizeof(uuid.ints));
+ 
+@@ -173,12 +173,12 @@ static int probe_raid0(blkid_probe pr, b
+ 	}
+ 
+ 	if (blkid_probe_sprintf_version(pr, "%u.%u.%u", ma, mi, pa) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_uuid(pr, (unsigned char *) uuid.bytes) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_magic(pr, off, sizeof(mdp0->md_magic),
+ 				(unsigned char *) &mdp0->md_magic))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+@@ -191,24 +191,24 @@ static int probe_raid1(blkid_probe pr, o
+ 				off,
+ 				sizeof(struct mdp1_super_block));
+ 	if (!mdp1)
+-		return -1;
++		return errno ? -errno : 1;
+ 	if (le32_to_cpu(mdp1->magic) != MD_SB_MAGIC)
+-		return -1;
++		return 1;
+ 	if (le32_to_cpu(mdp1->major_version) != 1U)
+-		return -1;
++		return 1;
+ 	if (le64_to_cpu(mdp1->super_offset) != (uint64_t) off >> 9)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_uuid(pr, (unsigned char *) mdp1->set_uuid) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_uuid_as(pr,
+ 			(unsigned char *) mdp1->device_uuid, "UUID_SUB") != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_label(pr, mdp1->set_name,
+ 				sizeof(mdp1->set_name)) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_magic(pr, off, sizeof(mdp1->magic),
+ 				(unsigned char *) &mdp1->magic))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+@@ -216,35 +216,44 @@ int probe_raid(blkid_probe pr,
+ 		const struct blkid_idmag *mag __attribute__((__unused__)))
+ {
+ 	const char *ver = NULL;
++	int ret = BLKID_PROBE_NONE;
+ 
+ 	if (pr->size > MD_RESERVED_BYTES) {
+ 		/* version 0 at the end of the device */
+ 		uint64_t sboff = (pr->size & ~(MD_RESERVED_BYTES - 1))
+-			         - MD_RESERVED_BYTES;
+-		if (probe_raid0(pr, sboff) == 0)
+-			return 0;
++			- MD_RESERVED_BYTES;
++		ret = probe_raid0(pr, sboff);
++		if (ret < 1)
++			return ret;	/* error */
+ 
+ 		/* version 1.0 at the end of the device */
+ 		sboff = (pr->size & ~(0x1000 - 1)) - 0x2000;
+-		if (probe_raid1(pr, sboff) == 0)
++		ret = probe_raid1(pr, sboff);
++		if (ret < 0)
++			return ret;	/* error */
++		if (ret == 0)
+ 			ver = "1.0";
+ 	}
+ 
+ 	if (!ver) {
+ 		/* version 1.1 at the start of the device */
+-		if (probe_raid1(pr, 0) == 0)
++		ret = probe_raid1(pr, 0);
++		if (ret == 0)
+ 			ver = "1.1";
+ 
+ 		/* version 1.2 at 4k offset from the start */
+-		else if (probe_raid1(pr, 0x1000) == 0)
+-			ver = "1.2";
++		else if (ret == BLKID_PROBE_NONE) {
++			ret = probe_raid1(pr, 0x1000);
++			if (ret == 0)
++				ver = "1.2";
++		}
+ 	}
+ 
+ 	if (ver) {
+ 		blkid_probe_set_version(pr, ver);
+-		return 0;
++		return BLKID_PROBE_OK;
+ 	}
+-	return -1;
++	return ret;
+ }
+ 
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/lsi_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/lsi_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/lsi_raid.c.kzak	2013-04-08 17:55:40.254856179 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/lsi_raid.c	2014-03-28 15:11:44.681552026 +0100
+@@ -30,9 +30,9 @@ static int probe_lsiraid(blkid_probe pr,
+ 	struct lsi_metadata *lsi;
+ 
+ 	if (pr->size < 0x10000)
+-		return -1;
++		return 1;
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return 1;
+ 
+ 	off = ((pr->size / 0x200) - 1) * 0x200;
+ 	lsi = (struct lsi_metadata *)
+@@ -40,13 +40,13 @@ static int probe_lsiraid(blkid_probe pr,
+ 				off,
+ 				sizeof(struct lsi_metadata));
+ 	if (!lsi)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (memcmp(lsi->sig, LSI_SIGNATURE, sizeof(LSI_SIGNATURE)-1) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_magic(pr, off, sizeof(lsi->sig),
+ 				(unsigned char *) lsi->sig))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/luks.c.kzak util-linux-2.23.2/libblkid/src/superblocks/luks.c
+--- util-linux-2.23.2/libblkid/src/superblocks/luks.c.kzak	2013-04-08 17:55:40.254856179 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/luks.c	2014-03-28 15:11:44.681552026 +0100
+@@ -45,7 +45,7 @@ static int probe_luks(blkid_probe pr, co
+ 
+ 	header = blkid_probe_get_sb(pr, mag, struct luks_phdr);
+ 	if (header == NULL)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_strncpy_uuid(pr, (unsigned char *) header->uuid,
+ 			sizeof(header->uuid));
+diff -up util-linux-2.23.2/libblkid/src/superblocks/lvm.c.kzak util-linux-2.23.2/libblkid/src/superblocks/lvm.c
+--- util-linux-2.23.2/libblkid/src/superblocks/lvm.c.kzak	2013-06-13 09:46:10.422650639 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/lvm.c	2014-03-28 15:11:44.681552026 +0100
+@@ -82,7 +82,7 @@ static int probe_lvm2(blkid_probe pr, co
+ 			mag->kboff << 10,
+ 			512 + sizeof(struct lvm2_pv_label_header));
+ 	if (!buf)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	/* buf is at 0k or 1k offset; find label inside */
+ 	if (memcmp(buf, "LABELONE", 8) == 0) {
+@@ -129,7 +129,7 @@ static int probe_lvm1(blkid_probe pr, co
+ 
+ 	label = blkid_probe_get_sb(pr, mag, struct lvm1_pv_label_header);
+ 	if (!label)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	version = le16_to_cpu(label->version);
+ 	if (version != 1 && version != 2)
+@@ -164,7 +164,7 @@ static int probe_verity(blkid_probe pr,
+ 
+ 	sb = blkid_probe_get_sb(pr, mag, struct verity_sb);
+ 	if (sb == NULL)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	version = le32_to_cpu(sb->version);
+ 	if (version != 1)
+diff -up util-linux-2.23.2/libblkid/src/superblocks/minix.c.kzak util-linux-2.23.2/libblkid/src/superblocks/minix.c
+--- util-linux-2.23.2/libblkid/src/superblocks/minix.c.kzak	2013-06-13 09:46:10.423650647 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/minix.c	2014-03-28 15:11:44.681552026 +0100
+@@ -80,17 +80,17 @@ static int probe_minix(blkid_probe pr, c
+ 			max(sizeof(struct minix_super_block),
+ 			    sizeof(struct minix3_super_block)));
+ 	if (!data)
+-		return -1;
++		return errno ? -errno : 1;
+ 	version = get_minix_version(data, &swabme);
+ 	if (version < 1)
+-		return -1;
++		return 1;
+ 
+ 	if (version <= 2) {
+ 		struct minix_super_block *sb = (struct minix_super_block *) data;
+ 		int zones, ninodes, imaps, zmaps, firstz;
+ 
+ 		if (sb->s_imap_blocks == 0 || sb->s_zmap_blocks == 0)
+-			return -1;
++			return 1;
+ 
+ 		zones = version == 2 ? minix_swab32(swabme, sb->s_zones) :
+ 				       minix_swab16(swabme, sb->s_nzones);
+@@ -101,15 +101,15 @@ static int probe_minix(blkid_probe pr, c
+ 
+ 		/* sanity checks to be sure that the FS is really minix */
+ 		if (imaps * MINIX_BLOCK_SIZE * 8 < ninodes + 1)
+-			return -1;
++			return 1;
+ 		if (zmaps * MINIX_BLOCK_SIZE * 8 < zones - firstz + 1)
+-			return -1;
++			return 1;
+ 
+ 	} else if (version == 3) {
+ 		struct minix3_super_block *sb = (struct minix3_super_block *) data;
+ 
+ 		if (sb->s_imap_blocks == 0 || sb->s_zmap_blocks == 0)
+-			return -1;
++			return 1;
+ 	}
+ 
+ 	/* unfortunately, some parts of ext3 is sometimes possible to
+@@ -117,8 +117,10 @@ static int probe_minix(blkid_probe pr, c
+ 	 * string. (For extN magic string and offsets see ext.c.)
+ 	 */
+ 	ext = blkid_probe_get_buffer(pr, 0x400 + 0x38, 2);
+-	if (ext && memcmp(ext, "\123\357", 2) == 0)
+-		return -1;
++	if (!ext)
++		return errno ? -errno : 1;
++	else if (memcmp(ext, "\123\357", 2) == 0)
++		return 1;
+ 
+ 	blkid_probe_sprintf_version(pr, "%d", version);
+ 	return 0;
+diff -up util-linux-2.23.2/libblkid/src/superblocks/netware.c.kzak util-linux-2.23.2/libblkid/src/superblocks/netware.c
+--- util-linux-2.23.2/libblkid/src/superblocks/netware.c.kzak	2013-04-08 17:55:40.255856188 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/netware.c	2014-03-28 15:11:44.681552026 +0100
+@@ -71,7 +71,7 @@ static int probe_netware(blkid_probe pr,
+ 
+ 	nw = blkid_probe_get_sb(pr, mag, struct netware_super_block);
+ 	if (!nw)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_set_uuid(pr, nw->SBH_PoolID);
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/nilfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/nilfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/nilfs.c.kzak	2013-04-08 17:55:40.256856198 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/nilfs.c	2014-03-28 15:11:44.681552026 +0100
+@@ -82,7 +82,7 @@ static int probe_nilfs2(blkid_probe pr,
+ 
+ 	sb = blkid_probe_get_sb(pr, mag, struct nilfs_super_block);
+ 	if (!sb)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	bytes = le16_to_cpu(sb->s_bytes);
+ 	crc = crc32(le32_to_cpu(sb->s_crc_seed), (unsigned char *)sb, sumoff);
+@@ -90,7 +90,7 @@ static int probe_nilfs2(blkid_probe pr,
+ 	crc = crc32(crc, (unsigned char *)sb + sumoff + 4, bytes - sumoff - 4);
+ 
+ 	if (crc != le32_to_cpu(sb->s_sum))
+-		return -1;
++		return 1;
+ 
+ 	if (strlen(sb->s_volume_name))
+ 		blkid_probe_set_label(pr, (unsigned char *) sb->s_volume_name,
+diff -up util-linux-2.23.2/libblkid/src/superblocks/ntfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/ntfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/ntfs.c.kzak	2013-06-13 09:46:10.423650647 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/ntfs.c	2014-03-28 15:11:44.681552026 +0100
+@@ -91,7 +91,7 @@ static int probe_ntfs(blkid_probe pr, co
+ 
+ 	ns = blkid_probe_get_sb(pr, mag, struct ntfs_super_block);
+ 	if (!ns)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	/*
+ 	 * Check bios parameters block
+@@ -158,7 +158,7 @@ static int probe_ntfs(blkid_probe pr, co
+ 
+ 	buf_mft = blkid_probe_get_buffer(pr, off, mft_record_size);
+ 	if (!buf_mft)
+-		return 1;
++		return errno ? -errno : 1;
+ 
+ 	if (memcmp(buf_mft, "FILE", 4))
+ 		return 1;
+@@ -167,7 +167,7 @@ static int probe_ntfs(blkid_probe pr, co
+ 
+ 	buf_mft = blkid_probe_get_buffer(pr, off, mft_record_size);
+ 	if (!buf_mft)
+-		return 1;
++		return errno ? -errno : 1;
+ 
+ 	if (memcmp(buf_mft, "FILE", 4))
+ 		return 1;
+diff -up util-linux-2.23.2/libblkid/src/superblocks/nvidia_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/nvidia_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/nvidia_raid.c.kzak	2013-04-08 17:55:40.257856207 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/nvidia_raid.c	2014-03-28 15:11:44.682552036 +0100
+@@ -32,9 +32,9 @@ static int probe_nvraid(blkid_probe pr,
+ 	struct nv_metadata *nv;
+ 
+ 	if (pr->size < 0x10000)
+-		return -1;
++		return 1;
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return 1;
+ 
+ 	off = ((pr->size / 0x200) - 2) * 0x200;
+ 	nv = (struct nv_metadata *)
+@@ -42,15 +42,15 @@ static int probe_nvraid(blkid_probe pr,
+ 				off,
+ 				sizeof(struct nv_metadata));
+ 	if (!nv)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (memcmp(nv->vendor, NVIDIA_SIGNATURE, sizeof(NVIDIA_SIGNATURE)-1) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_sprintf_version(pr, "%u", le16_to_cpu(nv->version)) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_magic(pr, off, sizeof(nv->vendor),
+ 				(unsigned char *) nv->vendor))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/ocfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/ocfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/ocfs.c.kzak	2013-04-08 17:55:40.257856207 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/ocfs.c	2014-03-28 15:11:44.682552036 +0100
+@@ -109,14 +109,14 @@ static int probe_ocfs(blkid_probe pr, co
+ 	buf = blkid_probe_get_buffer(pr, mag->kboff << 10,
+ 			sizeof(struct ocfs_volume_header));
+ 	if (!buf)
+-		return -1;
++		return errno ? -errno : 1;
+ 	memcpy(&ovh, buf, sizeof(ovh));
+ 
+ 	/* label */
+ 	buf = blkid_probe_get_buffer(pr, (mag->kboff << 10) + 512,
+ 			sizeof(struct ocfs_volume_label));
+ 	if (!buf)
+-		return -1;
++		return errno ? -errno : 1;
+ 	memcpy(&ovl, buf, sizeof(ovl));
+ 
+ 	maj = ocfsmajor(ovh);
+@@ -144,7 +144,7 @@ static int probe_ocfs2(blkid_probe pr, c
+ 
+ 	osb = blkid_probe_get_sb(pr, mag, struct ocfs2_super_block);
+ 	if (!osb)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_set_label(pr, (unsigned char *) osb->s_label, sizeof(osb->s_label));
+ 	blkid_probe_set_uuid(pr, osb->s_uuid);
+@@ -162,7 +162,7 @@ static int probe_oracleasm(blkid_probe p
+ 
+ 	dl = blkid_probe_get_sb(pr, mag, struct oracle_asm_disk_label);
+ 	if (!dl)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_set_label(pr, (unsigned char *) dl->dl_id, sizeof(dl->dl_id));
+ 	return 0;
+diff -up util-linux-2.23.2/libblkid/src/superblocks/promise_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/promise_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/promise_raid.c.kzak	2013-06-13 09:46:10.423650647 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/promise_raid.c	2014-03-28 15:11:44.682552036 +0100
+@@ -33,9 +33,9 @@ static int probe_pdcraid(blkid_probe pr,
+ 	};
+ 
+ 	if (pr->size < 0x40000)
+-		return -1;
++		return 1;
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return 1;
+ 
+ 	for (i = 0; sectors[i] != 0; i++) {
+ 		uint64_t off;
+@@ -47,18 +47,18 @@ static int probe_pdcraid(blkid_probe pr,
+ 					off,
+ 					sizeof(struct promise_metadata));
+ 		if (!pdc)
+-			return -1;
++			return errno ? -errno : 1;
+ 
+ 		if (memcmp(pdc->sig, PDC_SIGNATURE,
+ 				sizeof(PDC_SIGNATURE) - 1) == 0) {
+ 
+ 			if (blkid_probe_set_magic(pr, off, sizeof(pdc->sig),
+ 						(unsigned char *) pdc->sig))
+-				return -1;
++				return 1;
+ 			return 0;
+ 		}
+ 	}
+-	return -1;
++	return 1;
+ }
+ 
+ const struct blkid_idinfo pdcraid_idinfo = {
+diff -up util-linux-2.23.2/libblkid/src/superblocks/reiserfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/reiserfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/reiserfs.c.kzak	2013-04-08 17:55:40.258856216 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/reiserfs.c	2014-03-28 15:11:44.682552036 +0100
+@@ -45,17 +45,17 @@ static int probe_reiser(blkid_probe pr,
+ 
+ 	rs = blkid_probe_get_sb(pr, mag, struct reiserfs_super_block);
+ 	if (!rs)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blocksize = le16_to_cpu(rs->rs_blocksize);
+ 
+ 	/* The blocksize must be at least 512B */
+ 	if ((blocksize >> 9) == 0)
+-		return -BLKID_ERR_PARAM;
++		return 1;
+ 
+ 	/* If the superblock is inside the journal, we have the wrong one */
+ 	if (mag->kboff / (blocksize >> 9) > le32_to_cpu(rs->rs_journal_block) / 2)
+-		return -BLKID_ERR_BIG;
++		return 1;
+ 
+ 	/* LABEL/UUID are only valid for later versions of Reiserfs v3.6. */
+ 	if (mag->magic[6] == '2' || mag->magic[6] == '3') {
+@@ -82,7 +82,7 @@ static int probe_reiser4(blkid_probe pr,
+ 
+ 	rs4 = blkid_probe_get_sb(pr, mag, struct reiser4_super_block);
+ 	if (!rs4)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (*rs4->rs4_label)
+ 		blkid_probe_set_label(pr, rs4->rs4_label, sizeof(rs4->rs4_label));
+diff -up util-linux-2.23.2/libblkid/src/superblocks/romfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/romfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/romfs.c.kzak	2013-04-08 17:55:40.258856216 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/romfs.c	2014-03-28 15:11:44.682552036 +0100
+@@ -29,7 +29,7 @@ static int probe_romfs(blkid_probe pr, c
+ 
+ 	ros = blkid_probe_get_sb(pr, mag, struct romfs_super_block);
+ 	if (!ros)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (strlen((char *) ros->ros_volume))
+ 		blkid_probe_set_label(pr, ros->ros_volume,
+diff -up util-linux-2.23.2/libblkid/src/superblocks/silicon_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/silicon_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/silicon_raid.c.kzak	2013-06-13 09:46:10.424650656 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/silicon_raid.c	2014-03-28 15:11:44.682552036 +0100
+@@ -88,9 +88,9 @@ static int probe_silraid(blkid_probe pr,
+ 	struct silicon_metadata *sil;
+ 
+ 	if (pr->size < 0x10000)
+-		return -1;
++		return 1;
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return 1;
+ 
+ 	off = ((pr->size / 0x200) - 1) * 0x200;
+ 
+@@ -98,27 +98,27 @@ static int probe_silraid(blkid_probe pr,
+ 			blkid_probe_get_buffer(pr, off,
+ 				sizeof(struct silicon_metadata));
+ 	if (!sil)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (le32_to_cpu(sil->magic) != SILICON_MAGIC)
+-		return -1;
++		return 1;
+ 	if (sil->disk_number >= 8)
+-		return -1;
++		return 1;
+ 	if (!checksum(sil)) {
+ 		DBG(LOWPROBE, blkid_debug("silicon raid: incorrect checksum"));
+-		return -1;
++		return 1;
+ 	}
+ 
+ 	if (blkid_probe_sprintf_version(pr, "%u.%u",
+ 				le16_to_cpu(sil->major_ver),
+ 				le16_to_cpu(sil->minor_ver)) != 0)
+-		return -1;
++		return 1;
+ 
+ 	if (blkid_probe_set_magic(pr,
+ 			off + offsetof(struct silicon_metadata, magic),
+ 			sizeof(sil->magic),
+ 			(unsigned char *) &sil->magic))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/squashfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/squashfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/squashfs.c.kzak	2013-04-08 17:55:40.258856216 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/squashfs.c	2014-03-28 15:11:44.682552036 +0100
+@@ -34,7 +34,7 @@ static int probe_squashfs(blkid_probe pr
+ 
+ 	sq = blkid_probe_get_sb(pr, mag, struct sqsh_super_block);
+ 	if (!sq)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (strcmp(mag->magic, "sqsh") == 0 ||
+ 	    strcmp(mag->magic, "qshs") == 0)
+diff -up util-linux-2.23.2/libblkid/src/superblocks/superblocks.c.kzak util-linux-2.23.2/libblkid/src/superblocks/superblocks.c
+--- util-linux-2.23.2/libblkid/src/superblocks/superblocks.c.kzak	2013-07-30 10:39:26.209738269 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/superblocks.c	2014-03-28 15:11:44.682552036 +0100
+@@ -331,9 +331,10 @@ int blkid_superblocks_get_name(size_t id
+ static int superblocks_probe(blkid_probe pr, struct blkid_chain *chn)
+ {
+ 	size_t i;
++	int rc = BLKID_PROBE_NONE;
+ 
+ 	if (!pr || chn->idx < -1)
+-		return -1;
++		return -EINVAL;
+ 	blkid_probe_chain_reset_vals(pr, chn);
+ 
+ 	DBG(LOWPROBE, blkid_debug("--> starting probing loop [SUBLKS idx=%d]",
+@@ -351,38 +352,50 @@ static int superblocks_probe(blkid_probe
+ 		const struct blkid_idinfo *id;
+ 		const struct blkid_idmag *mag = NULL;
+ 		blkid_loff_t off = 0;
+-		int rc = 0;
+ 
+ 		chn->idx = i;
+ 		id = idinfos[i];
+ 
+ 		if (chn->fltr && blkid_bmp_get_item(chn->fltr, i)) {
+ 			DBG(LOWPROBE, blkid_debug("filter out: %s", id->name));
++			rc = BLKID_PROBE_NONE;
+ 			continue;
+ 		}
+ 
+-		if (id->minsz && id->minsz > pr->size)
++		if (id->minsz && id->minsz > pr->size) {
++			rc = BLKID_PROBE_NONE;
+ 			continue;	/* the device is too small */
++		}
+ 
+ 		/* don't probe for RAIDs, swap or journal on CD/DVDs */
+ 		if ((id->usage & (BLKID_USAGE_RAID | BLKID_USAGE_OTHER)) &&
+-		    blkid_probe_is_cdrom(pr))
++		    blkid_probe_is_cdrom(pr)) {
++			rc = BLKID_PROBE_NONE;
+ 			continue;
++		}
+ 
+ 		/* don't probe for RAIDs on floppies */
+-		if ((id->usage & BLKID_USAGE_RAID) && blkid_probe_is_tiny(pr))
++		if ((id->usage & BLKID_USAGE_RAID) && blkid_probe_is_tiny(pr)) {
++			rc = BLKID_PROBE_NONE;
+ 			continue;
++		}
+ 
+ 		DBG(LOWPROBE, blkid_debug("[%zd] %s:", i, id->name));
+ 
+-		if (blkid_probe_get_idmag(pr, id, &off, &mag))
++		rc = blkid_probe_get_idmag(pr, id, &off, &mag);
++		if (rc < 0)
++			break;
++		if (rc != BLKID_PROBE_OK)
+ 			continue;
+ 
+ 		/* final check by probing function */
+ 		if (id->probefunc) {
+ 			DBG(LOWPROBE, blkid_debug("\tcall probefunc()"));
+-			if (id->probefunc(pr, mag) != 0) {
++			rc = id->probefunc(pr, mag);
++			if (rc != BLKID_PROBE_OK) {
+ 				blkid_probe_chain_reset_vals(pr, chn);
++				if (rc < 0)
++					break;
+ 				continue;
+ 			}
+ 		}
+@@ -407,13 +420,13 @@ static int superblocks_probe(blkid_probe
+ 
+ 		DBG(LOWPROBE, blkid_debug("<-- leaving probing loop (type=%s) [SUBLKS idx=%d]",
+ 			id->name, chn->idx));
+-		return 0;
++		return BLKID_PROBE_OK;
+ 	}
+ 
+ nothing:
+-	DBG(LOWPROBE, blkid_debug("<-- leaving probing loop (failed) [SUBLKS idx=%d]",
+-		chn->idx));
+-	return 1;
++	DBG(LOWPROBE, blkid_debug("<-- leaving probing loop (failed=%d) [SUBLKS idx=%d]",
++			rc, chn->idx));
++	return rc;
+ }
+ 
+ /*
+diff -up util-linux-2.23.2/libblkid/src/superblocks/swap.c.kzak util-linux-2.23.2/libblkid/src/superblocks/swap.c
+--- util-linux-2.23.2/libblkid/src/superblocks/swap.c.kzak	2013-06-13 09:46:10.425650665 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/swap.c	2014-03-28 15:11:44.682552036 +0100
+@@ -44,17 +44,17 @@ static int swap_set_info(blkid_probe pr,
+ 	hdr = (struct swap_header_v1_2 *) blkid_probe_get_buffer(pr, 1024,
+ 				sizeof(struct swap_header_v1_2));
+ 	if (!hdr)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	/* SWAPSPACE2 - check for wrong version or zeroed pagecount */
+         if (strcmp(version, "2") == 0) {
+ 		if (hdr->version != 1 && swab32(hdr->version) != 1) {
+ 			DBG(LOWPROBE, blkid_debug("incorrect swap version"));
+-			return -1;
++			return 1;
+ 		}
+ 		if (hdr->lastpage == 0) {
+ 			DBG(LOWPROBE, blkid_debug("not set last swap page"));
+-			return -1;
++			return 1;
+ 		}
+         }
+ 
+@@ -62,9 +62,9 @@ static int swap_set_info(blkid_probe pr,
+ 	if (hdr->padding[32] == 0 && hdr->padding[33] == 0) {
+ 		if (hdr->volume[0] && blkid_probe_set_label(pr, hdr->volume,
+ 				sizeof(hdr->volume)) < 0)
+-			return -1;
++			return 1;
+ 		if (blkid_probe_set_uuid(pr, hdr->uuid) < 0)
+-			return -1;
++			return 1;
+ 	}
+ 
+ 	blkid_probe_set_version(pr, version);
+@@ -76,12 +76,12 @@ static int probe_swap(blkid_probe pr, co
+ 	unsigned char *buf;
+ 
+ 	if (!mag)
+-		return -1;
++		return 1;
+ 
+ 	/* TuxOnIce keeps valid swap header at the end of the 1st page */
+ 	buf = blkid_probe_get_buffer(pr, 0, TOI_MAGIC_STRLEN);
+ 	if (!buf)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (memcmp(buf, TOI_MAGIC_STRING, TOI_MAGIC_STRLEN) == 0)
+ 		return 1;	/* Ignore swap signature, it's TuxOnIce */
+@@ -94,13 +94,13 @@ static int probe_swap(blkid_probe pr, co
+ 	} else if (!memcmp(mag->magic, "SWAPSPACE2", mag->len))
+ 		return swap_set_info(pr, "2");
+ 
+-	return -1;
++	return 1;
+ }
+ 
+ static int probe_swsuspend(blkid_probe pr, const struct blkid_idmag *mag)
+ {
+ 	if (!mag)
+-		return -1;
++		return 1;
+ 	if (!memcmp(mag->magic, "S1SUSPEND", mag->len))
+ 		return swap_set_info(pr, "s1suspend");
+ 	if (!memcmp(mag->magic, "S2SUSPEND", mag->len))
+@@ -112,7 +112,7 @@ static int probe_swsuspend(blkid_probe p
+ 	if (!memcmp(mag->magic, "LINHIB0001", mag->len))
+ 		return swap_set_info(pr, "linhib0001");
+ 
+-	return -1;	/* no signature detected */
++	return 1;	/* no signature detected */
+ }
+ 
+ const struct blkid_idinfo swap_idinfo =
+diff -up util-linux-2.23.2/libblkid/src/superblocks/sysv.c.kzak util-linux-2.23.2/libblkid/src/superblocks/sysv.c
+--- util-linux-2.23.2/libblkid/src/superblocks/sysv.c.kzak	2013-04-08 17:55:40.261856245 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/sysv.c	2014-03-28 15:11:44.683552047 +0100
+@@ -80,7 +80,7 @@ static int probe_xenix(blkid_probe pr, c
+ 
+ 	sb = blkid_probe_get_sb(pr, mag, struct xenix_super_block);
+ 	if (!sb)
+-		return -1;
++		return errno ? -errno : 1;
+ 	blkid_probe_set_label(pr, sb->s_fname, sizeof(sb->s_fname));
+ 	return 0;
+ }
+@@ -105,21 +105,21 @@ static int probe_sysv(blkid_probe pr,
+ 					off,
+ 					sizeof(struct sysv_super_block));
+ 		if (!sb)
+-			return -1;
++			return errno ? -errno : 1;
+ 
+ 		if (sb->s_magic == cpu_to_le32(0xfd187e20) ||
+ 		    sb->s_magic == cpu_to_be32(0xfd187e20)) {
+ 
+ 			if (blkid_probe_set_label(pr, sb->s_fname,
+ 						sizeof(sb->s_fname)))
+-				return -1;
++				return 1;
+ 
+ 			if (blkid_probe_set_magic(pr,
+ 					off + offsetof(struct sysv_super_block,
+ 								s_magic),
+ 					sizeof(sb->s_magic),
+ 					(unsigned char *) &sb->s_magic))
+-				return -1;
++				return 1;
+ 
+ 			return 0;
+ 		}
+diff -up util-linux-2.23.2/libblkid/src/superblocks/ubifs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/ubifs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/ubifs.c.kzak	2013-06-13 09:46:10.426650673 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/ubifs.c	2014-03-28 15:11:44.683552047 +0100
+@@ -99,7 +99,7 @@ static int probe_ubifs(blkid_probe pr, c
+ 
+ 	sb = blkid_probe_get_sb(pr, mag, struct ubifs_sb_node);
+ 	if (!sb)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_set_uuid(pr, sb->uuid);
+ 	blkid_probe_sprintf_version(pr, "w%dr%d",
+diff -up util-linux-2.23.2/libblkid/src/superblocks/udf.c.kzak util-linux-2.23.2/libblkid/src/superblocks/udf.c
+--- util-linux-2.23.2/libblkid/src/superblocks/udf.c.kzak	2013-06-13 09:46:10.426650673 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/udf.c	2014-03-28 15:11:44.683552047 +0100
+@@ -85,11 +85,11 @@ static int probe_udf(blkid_probe pr,
+ 					UDF_VSD_OFFSET + b,
+ 					sizeof(*vsd));
+ 		if (!vsd)
+-			return 1;
++			return errno ? -errno : 1;
+ 		if (vsd->id[0] != '\0')
+ 			goto nsr;
+ 	}
+-	return -1;
++	return 1;
+ 
+ nsr:
+ 	/* search the list of VSDs for a NSR descriptor */
+@@ -99,15 +99,15 @@ nsr:
+ 					UDF_VSD_OFFSET + ((blkid_loff_t) b * 0x800),
+ 					sizeof(*vsd));
+ 		if (!vsd)
+-			return -1;
++			return errno ? -errno : 1;
+ 		if (vsd->id[0] == '\0')
+-			return -1;
++			return 1;
+ 		if (memcmp(vsd->id, "NSR02", 5) == 0)
+ 			goto anchor;
+ 		if (memcmp(vsd->id, "NSR03", 5) == 0)
+ 			goto anchor;
+ 	}
+-	return -1;
++	return 1;
+ 
+ anchor:
+ 	/* read Anchor Volume Descriptor (AVDP), checking block size */
+@@ -115,7 +115,7 @@ anchor:
+ 		vd = (struct volume_descriptor *)
+ 			blkid_probe_get_buffer(pr, 256 * pbs[i], sizeof(*vd));
+ 		if (!vd)
+-			return -1;
++			return errno ? -errno : 1;
+ 
+ 		type = le16_to_cpu(vd->tag.id);
+ 		if (type == 2) /* TAG_ID_AVDP */
+@@ -138,7 +138,7 @@ real_blksz:
+ 					(blkid_loff_t) (loc + b) * bs,
+ 					sizeof(*vd));
+ 		if (!vd)
+-			return -1;
++			return errno ? -errno : 1;
+ 	}
+ 
+ 	/* Try extract all possible ISO9660 information -- if there is
+@@ -155,7 +155,7 @@ real_blksz:
+ 					(blkid_loff_t) (loc + b) * bs,
+ 					sizeof(*vd));
+ 		if (!vd)
+-			return -1;
++			return errno ? -errno : 1;
+ 		type = le16_to_cpu(vd->tag.id);
+ 		if (type == 0)
+ 			break;
+diff -up util-linux-2.23.2/libblkid/src/superblocks/ufs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/ufs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/ufs.c.kzak	2013-04-08 17:55:40.263856264 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/ufs.c	2014-03-28 15:11:44.683552047 +0100
+@@ -185,7 +185,7 @@ static int probe_ufs(blkid_probe pr,
+ 					offsets[i] * 1024,
+ 					sizeof(struct ufs_super_block));
+ 		if (!ufs)
+-			return -1;
++			return errno ? -errno : 1;
+ 
+ 		magBE = be32_to_cpu(ufs->fs_magic);
+ 		magLE = le32_to_cpu(ufs->fs_magic);
+@@ -231,7 +231,7 @@ found:
+ 				offsetof(struct ufs_super_block, fs_magic),
+ 			sizeof(ufs->fs_magic),
+ 			(unsigned char *) &ufs->fs_magic))
+-		return -1;
++		return 1;
+ 
+ 	return 0;
+ }
+diff -up util-linux-2.23.2/libblkid/src/superblocks/vfat.c.kzak util-linux-2.23.2/libblkid/src/superblocks/vfat.c
+--- util-linux-2.23.2/libblkid/src/superblocks/vfat.c.kzak	2013-06-13 09:46:10.426650673 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/vfat.c	2014-03-28 15:12:28.036993622 +0100
+@@ -255,16 +255,20 @@ int blkid_probe_is_vfat(blkid_probe pr)
+ 	struct vfat_super_block *vs;
+ 	struct msdos_super_block *ms;
+ 	const struct blkid_idmag *mag = NULL;
++	int rc;
+ 
+-	if (blkid_probe_get_idmag(pr, &vfat_idinfo, NULL, &mag) || !mag)
++	rc = blkid_probe_get_idmag(pr, &vfat_idinfo, NULL, &mag);
++	if (rc < 0)
++		return rc;	/* error */
++	if (rc != BLKID_PROBE_OK || !mag)
+ 		return 0;
+ 
+ 	ms = blkid_probe_get_sb(pr, mag, struct msdos_super_block);
+ 	if (!ms)
+-		return 0;
++		return errno ? -errno : 0;
+ 	vs = blkid_probe_get_sb(pr, mag, struct vfat_super_block);
+ 	if (!vs)
+-		return 0;
++		return errno ? -errno : 0;
+ 
+ 	return fat_valid_superblock(mag, ms, vs, NULL, NULL);
+ }
+@@ -283,10 +287,12 @@ static int probe_vfat(blkid_probe pr, co
+ 
+ 	ms = blkid_probe_get_sb(pr, mag, struct msdos_super_block);
+ 	if (!ms)
+-		return 0;
++		return errno ? -errno : 1;
++
+ 	vs = blkid_probe_get_sb(pr, mag, struct vfat_super_block);
+ 	if (!vs)
+-		return 0;
++		return errno ? -errno : 1;
++
+ 	if (!fat_valid_superblock(mag, ms, vs, &cluster_count, &fat_size))
+ 		return 1;
+ 
+@@ -376,16 +382,16 @@ static int probe_vfat(blkid_probe pr, co
+ 					(blkid_loff_t) fsinfo_sect * sector_size,
+ 					sizeof(struct fat32_fsinfo));
+ 			if (buf == NULL)
+-				return -1;
++				return errno ? -errno : 1;
+ 
+ 			fsinfo = (struct fat32_fsinfo *) buf;
+ 			if (memcmp(fsinfo->signature1, "\x52\x52\x61\x41", 4) != 0 &&
+ 			    memcmp(fsinfo->signature1, "\x52\x52\x64\x41", 4) != 0 &&
+ 			    memcmp(fsinfo->signature1, "\x00\x00\x00\x00", 4) != 0)
+-				return -1;
++				return 1;
+ 			if (memcmp(fsinfo->signature2, "\x72\x72\x41\x61", 4) != 0 &&
+ 			    memcmp(fsinfo->signature2, "\x00\x00\x00\x00", 4) != 0)
+-				return -1;
++				return 1;
+ 		}
+ 	}
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/via_raid.c.kzak util-linux-2.23.2/libblkid/src/superblocks/via_raid.c
+--- util-linux-2.23.2/libblkid/src/superblocks/via_raid.c.kzak	2013-04-08 17:55:40.264856273 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/via_raid.c	2014-03-28 15:11:44.683552047 +0100
+@@ -52,9 +52,9 @@ static int probe_viaraid(blkid_probe pr,
+ 	struct via_metadata *v;
+ 
+ 	if (pr->size < 0x10000)
+-		return -1;
++		return 1;
+ 	if (!S_ISREG(pr->mode) && !blkid_probe_is_wholedisk(pr))
+-		return -1;
++		return 1;
+ 
+ 	off = ((pr->size / 0x200)-1) * 0x200;
+ 
+@@ -63,19 +63,19 @@ static int probe_viaraid(blkid_probe pr,
+ 				off,
+ 				sizeof(struct via_metadata));
+ 	if (!v)
+-		return -1;
++		return errno ? -errno : 1;
+ 	if (le16_to_cpu(v->signature) != VIA_SIGNATURE)
+-		return -1;
++		return 1;
+ 	if (v->version_number > 2)
+-		return -1;
++		return 1;
+ 	if (!via_checksum(v))
+-		return -1;
++		return 1;
+ 	if (blkid_probe_sprintf_version(pr, "%u", v->version_number) != 0)
+-		return -1;
++		return 1;
+ 	if (blkid_probe_set_magic(pr, off,
+ 				sizeof(v->signature),
+ 				(unsigned char *) &v->signature))
+-		return -1;
++		return 1;
+ 	return 0;
+ }
+ 
+diff -up util-linux-2.23.2/libblkid/src/superblocks/vmfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/vmfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/vmfs.c.kzak	2013-04-08 17:55:40.264856273 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/vmfs.c	2014-03-28 15:11:44.683552047 +0100
+@@ -28,7 +28,7 @@ static int probe_vmfs_fs(blkid_probe pr,
+ 
+ 	header = blkid_probe_get_sb(pr, mag, struct vmfs_fs_info);
+ 	if (header == NULL)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_sprintf_uuid(pr, (unsigned char *) header->uuid, 16,
+ 		"%02x%02x%02x%02x-%02x%02x%02x%02x-"
+@@ -53,7 +53,7 @@ static int probe_vmfs_volume(blkid_probe
+ 
+ 	header = blkid_probe_get_sb(pr, mag, struct vmfs_volume_info);
+ 	if (header == NULL)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_sprintf_value(pr, "UUID_SUB",
+ 		"%02x%02x%02x%02x-%02x%02x%02x%02x-"
+diff -up util-linux-2.23.2/libblkid/src/superblocks/vxfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/vxfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/vxfs.c.kzak	2013-04-08 17:55:40.264856273 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/vxfs.c	2014-03-28 15:11:44.683552047 +0100
+@@ -20,7 +20,7 @@ static int probe_vxfs(blkid_probe pr, co
+ 
+ 	vxs = blkid_probe_get_sb(pr, mag, struct vxfs_super_block);
+ 	if (!vxs)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	blkid_probe_sprintf_version(pr, "%u", (unsigned int) vxs->vs_version);
+ 	return 0;
+diff -up util-linux-2.23.2/libblkid/src/superblocks/xfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/xfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/xfs.c.kzak	2013-04-08 17:55:40.265856283 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/xfs.c	2014-03-28 15:11:44.683552047 +0100
+@@ -40,7 +40,7 @@ static int probe_xfs(blkid_probe pr, con
+ 
+ 	xs = blkid_probe_get_sb(pr, mag, struct xfs_super_block);
+ 	if (!xs)
+-		return -1;
++		return errno ? -errno : 1;
+ 
+ 	if (strlen(xs->xs_fname))
+ 		blkid_probe_set_label(pr, (unsigned char *) xs->xs_fname,
+diff -up util-linux-2.23.2/libblkid/src/superblocks/zfs.c.kzak util-linux-2.23.2/libblkid/src/superblocks/zfs.c
+--- util-linux-2.23.2/libblkid/src/superblocks/zfs.c.kzak	2013-06-13 09:46:10.427650682 +0200
++++ util-linux-2.23.2/libblkid/src/superblocks/zfs.c	2014-03-28 15:11:44.683552047 +0100
+@@ -185,7 +185,7 @@ static int probe_zfs(blkid_probe pr,
+ 			blkid_probe_get_buffer(pr, offset,
+ 					       sizeof(struct zfs_uberblock));
+ 		if (ub == NULL)
+-			return -1;
++			return errno ? -errno : 1;
+ 
+ 		if (ub->ub_magic == UBERBLOCK_MAGIC) {
+ 			ub_offset = offset;
+@@ -202,7 +202,7 @@ static int probe_zfs(blkid_probe pr,
+ 	}
+ 
+ 	if (found < 4)
+-		return -1;
++		return 1;
+ 
+ 	/* If we found the 4th uberblock, then we will have exited from the
+ 	 * scanning loop immediately, and ub will be a valid uberblock. */
+@@ -214,7 +214,7 @@ static int probe_zfs(blkid_probe pr,
+ 	if (blkid_probe_set_magic(pr, ub_offset,
+ 				sizeof(ub->ub_magic),
+ 				(unsigned char *) &ub->ub_magic))
+-		return -1;
++		return 1;
+ 
+ 	return 0;
+ }

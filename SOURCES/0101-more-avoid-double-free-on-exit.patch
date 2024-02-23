@@ -1,0 +1,42 @@
+From f98c5f53d4661ec22097d36f5debd195491ec3c6 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 15 Dec 2016 14:40:26 +0100
+Subject: [PATCH 101/116] more: avoid double free() on exit
+
+On 'q' command more(1) calls end_it() function with _exit(). The
+_exit() may suspend program execution due to pending I/O on very
+loaded server. In this time SIGINT may be delivered due to impatient
+user who will press ^C.
+
+And then end_it() cleanup function may be executed by signal handler
+too. The result is double free()...
+
+Upstream: https://github.com/karelzak/util-linux/commit/0ed2a954714992938b35893b70197090a61b3b2e
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1403971
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ text-utils/more.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/text-utils/more.c b/text-utils/more.c
+index 0e9c2bd..f98cb14 100644
+--- a/text-utils/more.c
++++ b/text-utils/more.c
+@@ -763,6 +763,14 @@ void chgwinsz(int dummy __attribute__((__unused__)))
+ /* Clean up terminal state and exit. Also come here if interrupt signal received */
+ void __attribute__((__noreturn__)) end_it(int dummy __attribute__((__unused__)))
+ {
++	/* May be executed as a signal handler as well as by main process.
++	 *
++	 * The _exit() may wait for pending I/O for really long time, be sure
++	 * that signal handler is not executed in this time to avoid double
++	 * de-initialization (free() calls, etc.).
++	 */
++	signal(SIGINT, SIG_IGN);
++
+ 	reset_tty();
+ 	if (clreol) {
+ 		putchar('\r');
+-- 
+2.9.3
+

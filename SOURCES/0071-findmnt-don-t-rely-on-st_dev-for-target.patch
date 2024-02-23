@@ -1,0 +1,104 @@
+From 0f66811659aa8fd8b14ade8a80bfecd580962b2d Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 10 Mar 2015 12:51:44 +0100
+Subject: [PATCH 71/84] findmnt: don't rely on st_dev for --target
+
+The overlay filesystem does not provide usable st_dev (in traditional
+UNIX way). It's necessary to search in /proc/self/mountinfo to detect
+which path element is mountpoint.
+
+$ findmnt --target /mnt/merged/dir-a/foo
+TARGET      SOURCE  FSTYPE  OPTIONS
+/mnt/merged overlay overlay rw,relatime,lowerdir=/mnt/low,upperdir=/mnt/high/data,workdir=/mnt/high/work
+
+Upstream: http://github.com/karelzak/util-linux/commit/cd41b385a06dde70bb45c3143d3459157bda58f8
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=587393
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libmount/src/utils.c |  6 +++++-
+ misc-utils/findmnt.8 |  8 ++++++--
+ misc-utils/findmnt.c | 17 +++++++++++------
+ 3 files changed, 22 insertions(+), 9 deletions(-)
+
+diff --git a/libmount/src/utils.c b/libmount/src/utils.c
+index 7c6f5b1..5783d88 100644
+--- a/libmount/src/utils.c
++++ b/libmount/src/utils.c
+@@ -859,7 +859,11 @@ int mnt_open_uniq_filename(const char *filename, char **name)
+  * This function finds the mountpoint that a given path resides in. @path
+  * should be canonicalized. The returned pointer should be freed by the caller.
+  *
+- * Returns: allocated string with target of the mounted device or NULL on error
++ * WARNING: the function compares st_dev of the @path elements. This traditional
++ * way maybe be insufficient on filesystems like Linux "overlay". See also
++ * mnt_table_find_target().
++ *
++ * Returns: allocated string with the target of the mounted device or NULL on error
+  */
+ char *mnt_get_mountpoint(const char *path)
+ {
+diff --git a/misc-utils/findmnt.8 b/misc-utils/findmnt.8
+index 407636e..54739b7 100644
+--- a/misc-utils/findmnt.8
++++ b/misc-utils/findmnt.8
+@@ -179,8 +179,12 @@ Search in
+ .IR /etc/fstab .
+ The output is in the list format (see \fB--list\fR).
+ .TP
+-.BR \-T , " \-\-target \fIdir\fP"
+-Explicitly define the mount target (mountpoint directory).
++.BR \-T , " \-\-target \fIpath\fP"
++Explicitly define the mount target (mountpoint directory). If the \fIpath\fR
++is not a mountpoint file or directory than
++.B findmnt
++checks \fIpath\fR elements in reverse order for get the mountpoint (this feature is 
++supported only if search in kernel files and unsupported for \fB\-\-fstab\fP).
+ .TP
+ .BR \-t , " \-\-types \fIlist\fP"
+ Limit the set of printed filesystems.  More than one type may be
+diff --git a/misc-utils/findmnt.c b/misc-utils/findmnt.c
+index f16da91..fe899db 100644
+--- a/misc-utils/findmnt.c
++++ b/misc-utils/findmnt.c
+@@ -236,9 +236,12 @@ static void set_source_match(const char *data)
+ 		set_match(COL_SOURCE, data);
+ }
+ 
+-static void enable_extra_target_match(void)
++/* @tb has to be from kernel (so no fstab or so)! */
++static void enable_extra_target_match(struct libmnt_table *tb)
+ {
+-	char *cn = NULL, *mnt = NULL;
++	char *cn = NULL;
++	const char *tgt = NULL, *mnt = NULL;
++	struct libmnt_fs *fs;
+ 
+ 	/*
+ 	 * Check if match pattern is mountpoint, if not use the
+@@ -248,9 +251,11 @@ static void enable_extra_target_match(void)
+ 	if (!cn)
+ 		return;
+ 
+-	mnt = mnt_get_mountpoint(cn);
+-	if (!mnt || strcmp(mnt, cn) == 0)
+-		return;
++	fs = mnt_table_find_mountpoint(tb, tgt, MNT_ITER_BACKWARD);
++	if (fs)
++		mnt = mnt_fs_get_target(fs);
++	if (mnt && strcmp(mnt, tgt) != 0)
++		set_match(COL_TARGET, xstrdup(mnt));	/* replace the current setting */
+ 
+ 	/* replace the current setting with the real mountpoint */
+ 	set_match(COL_TARGET, mnt);
+@@ -1484,7 +1489,7 @@ int main(int argc, char *argv[])
+ 			 * try it again with extra functionality for target
+ 			 * match
+ 			 */
+-			enable_extra_target_match();
++			enable_extra_target_match(tb);
+ 			rc = add_matching_lines(tb, tt, direction);
+ 		}
+ 	}
+-- 
+2.7.4
+

@@ -1,0 +1,69 @@
+From df6302339ae99535d3c075712db8cadeedbb6c00 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 17 Oct 2017 11:07:56 +0200
+Subject: [PATCH 137/141] wipefs: fix -t filter
+
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1486777
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ misc-utils/wipefs.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/misc-utils/wipefs.c b/misc-utils/wipefs.c
+index 0144c9ef8..a0852aa97 100644
+--- a/misc-utils/wipefs.c
++++ b/misc-utils/wipefs.c
+@@ -162,13 +162,16 @@ clone_offset(struct wipe_desc *wp0)
+ }
+ 
+ static struct wipe_desc *
+-get_desc_for_probe(struct wipe_desc *wp, blkid_probe pr)
++get_desc_for_probe(struct wipe_desc *wp, blkid_probe pr, int *found)
+ {
+ 	const char *off, *type, *mag, *p, *usage = NULL;
+ 	size_t len;
+ 	loff_t offset;
+ 	int rc, ispt = 0;
+ 
++	if (found)
++		*found = 0;
++
+ 	/* superblocks */
+ 	if (blkid_probe_lookup_value(pr, "TYPE", &type, NULL) == 0) {
+ 		rc = blkid_probe_lookup_value(pr, "SBMAGIC_OFFSET", &off, NULL);
+@@ -215,6 +218,8 @@ get_desc_for_probe(struct wipe_desc *wp, blkid_probe pr)
+ 	if (blkid_probe_lookup_value(pr, "UUID", &p, NULL) == 0)
+ 		wp->uuid = xstrdup(p);
+ 
++	if (found)
++		*found = 1;
+ 	return wp;
+ }
+ 
+@@ -266,7 +271,7 @@ read_offsets(struct wipe_desc *wp, const char *devname)
+ 		return NULL;
+ 
+ 	while (blkid_do_probe(pr) == 0) {
+-		wp = get_desc_for_probe(wp, pr);
++		wp = get_desc_for_probe(wp, pr, NULL);
+ 		if (!wp)
+ 			break;
+ 	}
+@@ -347,9 +352,13 @@ do_wipe(struct wipe_desc *wp, const char *devname, int noact, int all, int quiet
+ 	wp0 = clone_offset(wp);
+ 
+ 	while (blkid_do_probe(pr) == 0) {
+-		wp = get_desc_for_probe(wp, pr);
++		int found = 0;
++
++		wp = get_desc_for_probe(wp, pr, &found);
+ 		if (!wp)
+ 			break;
++		if (!found)
++			continue;
+ 
+ 		/* Check if offset is in provided list */
+ 		w = wp0;
+-- 
+2.13.6
+

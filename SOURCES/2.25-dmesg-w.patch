@@ -1,0 +1,12 @@
+diff -up util-linux-2.23.2/sys-utils/dmesg.c.kzak util-linux-2.23.2/sys-utils/dmesg.c
+--- util-linux-2.23.2/sys-utils/dmesg.c.kzak	2013-07-30 11:22:47.213494455 +0200
++++ util-linux-2.23.2/sys-utils/dmesg.c	2014-09-24 10:24:49.179371108 +0200
+@@ -991,6 +991,8 @@ static int init_kmsg(struct dmesg_contro
+ 
+ 	if (!ctl->follow)
+ 		mode |= O_NONBLOCK;
++	else
++		setlinebuf(stdout);
+ 
+ 	ctl->kmsg = open("/dev/kmsg", mode);
+ 	if (ctl->kmsg < 0)

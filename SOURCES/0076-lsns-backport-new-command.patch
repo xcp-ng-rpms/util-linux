@@ -1,0 +1,1251 @@
+From 03f539c766780a083010636cc67f96fcb2bab30f Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Fri, 24 Jun 2016 12:16:24 +0200
+Subject: [PATCH 76/84] lsns: backport new command
+
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1332084
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ bash-completion/lsns    |  55 ++++
+ configure.ac            |   6 +
+ include/Makemodule.am   |   1 +
+ include/c.h             |   8 +
+ include/debug.h         |   2 +-
+ include/idcache.h       |  28 ++
+ include/procutils.h     |   2 +
+ lib/Makemodule.am       |   1 +
+ lib/idcache.c           | 117 ++++++++
+ lib/procutils.c         |  43 +++
+ sys-utils/Makemodule.am |   7 +
+ sys-utils/lsns.8        |  78 +++++
+ sys-utils/lsns.c        | 748 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 13 files changed, 1095 insertions(+), 1 deletion(-)
+ create mode 100644 bash-completion/lsns
+ create mode 100644 include/idcache.h
+ create mode 100644 lib/idcache.c
+ create mode 100644 sys-utils/lsns.8
+ create mode 100644 sys-utils/lsns.c
+
+diff --git a/bash-completion/lsns b/bash-completion/lsns
+new file mode 100644
+index 0000000..d02df3b
+--- /dev/null
++++ b/bash-completion/lsns
+@@ -0,0 +1,55 @@
++_lsns_module()
++{
++	local cur prev OPTS LSNS_COLS_ALL
++	COMPREPLY=()
++	cur="${COMP_WORDS[COMP_CWORD]}"
++	prev="${COMP_WORDS[COMP_CWORD-1]}"
++	LSNS_COLS_ALL="
++		NS TYPE PATH NPROCS PID PPID COMMAND UID USER
++	"
++	case $prev in
++		'-o'|'--output')
++			local prefix realcur LSNS_COLS
++			realcur="${cur##*,}"
++			prefix="${cur%$realcur}"
++			for WORD in $LSNS_COLS_ALL; do
++				if ! [[ $prefix == *"$WORD"* ]]; then
++					LSNS_COLS="$WORD $LSNS_COLS"
++				fi
++			done
++			compopt -o nospace
++			COMPREPLY=( $(compgen -P "$prefix" -W "$LSNS_COLS" -S ',' -- $realcur) )
++			return 0
++			;;
++		'-p'|'--task')
++			COMPREPLY=( $(compgen -W "$(cd /proc && echo [0-9]*)" -- $cur) )
++			return 0
++			;;
++		'-t'|'--type')
++			COMPREPLY=( $(compgen -W "mnt net ipc user pid uts" -- $cur) )
++			return 0
++			;;
++		'-h'|'--help'|'-V'|'--version')
++			return 0
++			;;
++	esac
++	case $cur in
++		-*)
++			COMPREPLY=( $(compgen -W "
++					--list
++					--noheadings
++					--output
++					--task
++					--raw
++					--notruncate
++					--type
++					--help
++					--version
++				" -- $cur) )
++			return 0
++			;;
++	esac
++	COMPREPLY=( $(compgen -W "mnt net pid uts ipc user" -- $cur ) )
++	return 0
++}
++complete -F _lsns_module lsns
+diff --git a/configure.ac b/configure.ac
+index f3c7214..5d9ea39 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1032,6 +1032,12 @@ UL_REQUIRES_BUILD([lslogins], [libsmartcols])
+ AM_CONDITIONAL([BUILD_LSLOGINS], [test "x$build_lslogins" = xyes])
+ 
+ 
++UL_BUILD_INIT([lsns], [check])
++UL_REQUIRES_LINUX([lsns])
++UL_REQUIRES_BUILD([lsns], [libsmartcols])
++AM_CONDITIONAL([BUILD_LSNS], [test "x$build_lsns" = xyes])
++
++
+ UL_BUILD_INIT([chcpu], [check])
+ UL_REQUIRES_LINUX([chcpu])
+ UL_REQUIRES_HAVE([chcpu], [cpu_set_t], [cpu_set_t type])
+diff --git a/include/Makemodule.am b/include/Makemodule.am
+index 7b53244..757f317 100644
+--- a/include/Makemodule.am
++++ b/include/Makemodule.am
+@@ -15,6 +15,7 @@ dist_noinst_HEADERS += \
+ 	include/exec_shell.h \
+ 	include/exitcodes.h \
+ 	include/fileutils.h \
++	include/idcache.h \
+ 	include/ismounted.h \
+ 	include/linux_reboot.h \
+ 	include/linux_version.h \
+diff --git a/include/c.h b/include/c.h
+index 7b59ce8..a2779a5 100644
+--- a/include/c.h
++++ b/include/c.h
+@@ -110,6 +110,14 @@
+ 	_max1 > _max2 ? _max1 : _max2; })
+ #endif
+ 
++#ifndef cmp_numbers
++# define cmp_numbers(x, y) __extension__ ({	\
++	__typeof__(x) _a = (x);			\
++	__typeof__(y) _b = (y);			\
++	(void) (&_a == &_b);			\
++	_a == _b ? 0 : _a > _b ? 1 : -1; })
++#endif
++
+ #ifndef offsetof
+ #define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
+ #endif
+diff --git a/include/debug.h b/include/debug.h
+index 25045aa..848e474 100644
+--- a/include/debug.h
++++ b/include/debug.h
+@@ -15,7 +15,7 @@ struct dbg_mask { char *mname; int val; };
+ 
+ #define UL_DEBUG_DEFINE_MASK(m) int m ## _debug_mask
+ #define UL_DEBUG_DECLARE_MASK(m) extern UL_DEBUG_DEFINE_MASK(m)
+-#define UL_DEBUG_DEFINE_MASKANEMS(m) static const struct dbg_mask m ## _masknames[]
++#define UL_DEBUG_DEFINE_MASKNAMES(m) static const struct dbg_mask m ## _masknames[]
+ 
+ /* p - flag prefix, m - flag postfix */
+ #define UL_DEBUG_DEFINE_FLAG(p, m) p ## m
+diff --git a/include/idcache.h b/include/idcache.h
+new file mode 100644
+index 0000000..912edd5
+--- /dev/null
++++ b/include/idcache.h
+@@ -0,0 +1,28 @@
++#ifndef UTIL_LINUX_IDCACHE_H
++#define UTIL_LINUX_IDCACHE_H
++
++#include <sys/types.h>
++#include <pwd.h>
++
++#define IDCACHE_FLAGS_NAMELEN	(1 << 1)
++
++struct identry {
++	unsigned long int	id;
++	char			*name;
++	struct identry		*next;
++};
++
++struct idcache {
++	struct identry	*ent;	/* first entry */
++	int		width;	/* name width */
++};
++
++
++extern struct idcache *new_idcache(void);
++extern void add_gid(struct idcache *cache, unsigned long int id);
++extern void add_uid(struct idcache *cache, unsigned long int id);
++
++extern void free_idcache(struct idcache *ic);
++extern struct identry *get_id(struct idcache *ic, unsigned long int id);
++
++#endif /* UTIL_LINUX_IDCACHE_H */
+diff --git a/include/procutils.h b/include/procutils.h
+index 14b766c..9f8dd76 100644
+--- a/include/procutils.h
++++ b/include/procutils.h
+@@ -28,5 +28,7 @@ extern void proc_processes_filter_by_name(struct proc_processes *ps, const char
+ extern void proc_processes_filter_by_uid(struct proc_processes *ps, uid_t uid);
+ extern int proc_next_pid(struct proc_processes *ps, pid_t *pid);
+ 
++extern char *proc_get_command(pid_t pid);
++extern char *proc_get_command_name(pid_t pid);
+ 
+ #endif /* UTIL_LINUX_PROCUTILS */
+diff --git a/lib/Makemodule.am b/lib/Makemodule.am
+index eed31f1..73280f9 100644
+--- a/lib/Makemodule.am
++++ b/lib/Makemodule.am
+@@ -8,6 +8,7 @@ libcommon_la_SOURCES = \
+ 	lib/colors.c \
+ 	lib/crc32.c \
+ 	lib/env.c \
++	lib/idcache.c \
+ 	lib/fileutils.c \
+ 	lib/ismounted.c \
+ 	lib/mangle.c \
+diff --git a/lib/idcache.c b/lib/idcache.c
+new file mode 100644
+index 0000000..3c358b8
+--- /dev/null
++++ b/lib/idcache.c
+@@ -0,0 +1,117 @@
++
++#include <wchar.h>
++#include <pwd.h>
++#include <grp.h>
++#include <sys/types.h>
++
++#include "c.h"
++#include "idcache.h"
++
++#ifndef LOGIN_NAME_MAX
++#define LOGIN_NAME_MAX 256
++#endif
++
++struct identry *get_id(struct idcache *ic, unsigned long int id)
++{
++	struct identry *ent;
++
++	if (!ic)
++		return NULL;
++
++	for (ent = ic->ent; ent; ent = ent->next) {
++		if (ent->id == id)
++			return ent;
++	}
++
++	return NULL;
++}
++
++struct idcache *new_idcache()
++{
++	return calloc(1, sizeof(struct idcache));
++}
++
++void free_idcache(struct idcache *ic)
++{
++	struct identry *ent = ic->ent;
++
++	while (ent) {
++		struct identry *next = ent->next;
++		free(ent->name);
++		free(ent);
++		ent = next;
++	}
++
++	free(ic);
++}
++
++static void add_id(struct idcache *ic, char *name, unsigned long int id)
++{
++	struct identry *ent, *x;
++	int w = 0;
++
++	ent = calloc(1, sizeof(struct identry));
++	if (!ent)
++		return;
++	ent->id = id;
++
++	if (name) {
++#ifdef HAVE_WIDECHAR
++		wchar_t wc[LOGIN_NAME_MAX + 1];
++
++		if (mbstowcs(wc, name, LOGIN_NAME_MAX) > 0) {
++			wc[LOGIN_NAME_MAX] = '\0';
++			w = wcswidth(wc, LOGIN_NAME_MAX);
++		}
++		else
++#endif
++			w = strlen(name);
++	}
++
++	/* note, we ignore names with non-printable widechars */
++	if (w > 0) {
++		ent->name = strdup(name);
++		if (!ent->name) {
++			free(ent);
++			return;
++		}
++	} else {
++		if (asprintf(&ent->name, "%lu", id) < 0) {
++			free(ent);
++			return;
++		}
++	}
++
++	for (x = ic->ent; x && x->next; x = x->next);
++
++	if (x)
++		x->next = ent;
++	else
++		ic->ent = ent;
++
++	if (w <= 0)
++		w = ent->name ? strlen(ent->name) : 0;
++	ic->width = ic->width < w ? w : ic->width;
++	return;
++}
++
++void add_uid(struct idcache *cache, unsigned long int id)
++{
++	struct identry *ent= get_id(cache, id);
++
++	if (!ent) {
++		struct passwd *pw = getpwuid((uid_t) id);
++		add_id(cache, pw ? pw->pw_name : NULL, id);
++	}
++}
++
++void add_gid(struct idcache *cache, unsigned long int id)
++{
++	struct identry *ent = get_id(cache, id);
++
++	if (!ent) {
++		struct group *gr = getgrgid((gid_t) id);
++		add_id(cache, gr ? gr->gr_name : NULL, id);
++	}
++}
++
+diff --git a/lib/procutils.c b/lib/procutils.c
+index d633261..8dfdec9 100644
+--- a/lib/procutils.c
++++ b/lib/procutils.c
+@@ -25,6 +25,7 @@
+ #include "procutils.h"
+ #include "at.h"
+ #include "c.h"
++#include "all-io.h"
+ 
+ /*
+  * @pid: process ID for which we want to obtain the threads group
+@@ -193,6 +194,48 @@ int proc_next_pid(struct proc_processes *ps, pid_t *pid)
+ 	return 0;
+ }
+ 
++/* returns process command path, use free() for result */
++static char *proc_file_strdup(pid_t pid, const char *name)
++{
++	char buf[BUFSIZ], *res = NULL;
++	ssize_t sz = 0;
++	size_t i;
++	int fd;
++
++	snprintf(buf, sizeof(buf), "/proc/%d/%s", (int) pid, name);
++	fd = open(buf, O_RDONLY);
++	if (fd < 0)
++		goto done;
++
++	sz = read_all(fd, buf, sizeof(buf));
++	if (sz <= 0)
++		goto done;
++
++	for (i = 0; i < (size_t) sz; i++) {
++
++		if (buf[i] == '\0')
++			buf[i] = ' ';
++	}
++	buf[sz - 1] = '\0';
++	res = strdup(buf);
++done:
++	if (fd >= 0)
++		close(fd);
++	return res;
++}
++
++/* returns process command path, use free() for result */
++char *proc_get_command(pid_t pid)
++{
++	return proc_file_strdup(pid, "cmdline");
++}
++
++/* returns process command name, use free() for result */
++char *proc_get_command_name(pid_t pid)
++{
++	return proc_file_strdup(pid, "comm");
++}
++
+ #ifdef TEST_PROGRAM
+ 
+ static int test_tasks(int argc, char *argv[])
+diff --git a/sys-utils/Makemodule.am b/sys-utils/Makemodule.am
+index c6c561c..9baf5a3 100644
+--- a/sys-utils/Makemodule.am
++++ b/sys-utils/Makemodule.am
+@@ -182,6 +182,13 @@ prlimit_SOURCES = sys-utils/prlimit.c
+ prlimit_LDADD = $(LDADD) libcommon.la
+ endif
+ 
++if BUILD_LSNS
++usrbin_exec_PROGRAMS += lsns
++dist_man_MANS += sys-utils/lsns.8
++lsns_SOURCES =	sys-utils/lsns.c
++lsns_LDADD = $(LDADD) libcommon.la libsmartcols.la
++lsns_CFLAGS = $(AM_CFLAGS) -I$(ul_libsmartcols_incdir)
++endif
+ 
+ if BUILD_MOUNT
+ #
+diff --git a/sys-utils/lsns.8 b/sys-utils/lsns.8
+new file mode 100644
+index 0000000..328df47
+--- /dev/null
++++ b/sys-utils/lsns.8
+@@ -0,0 +1,78 @@
++.\" Man page for the lsns command.
++.\" Copyright 2015 Karel Zak <kzak@redhat.com>
++.\" May be distributed under the GNU General Public License
++
++.TH LSNS 8 "December 2015" "util-linux" "System Administration"
++.SH NAME
++lsns \- list namespaces
++.SH SYNOPSIS
++.B lsns
++[options]
++.RI [ namespace ]
++
++.SH DESCRIPTION
++.B lsns
++lists information about all the currently accessible namespaces or about the
++given \fInamespace\fP.  The \fInamespace\fP identifier is an inode number.
++
++The default output is subject to change.  So whenever possible, you should
++avoid using default outputs in your scripts.  Always explicitly define expected
++columns by using the \fB\-\-output\fR option together with a columns list in
++environments where a stable output is required.
++
++Note that \fBlsns\fR reads information directly from the /proc filesystem and
++for non-root users it may return incomplete information.  The current /proc
++filesystem may be unshared and affected by a PID namespace
++(see \fBunshare \-\-mount\-proc\fP for more details).
++.B lsns
++is not able to see persistent namespaces without processes where the namespace
++instance is held by a bind mount to /proc/\fIpid\fR/ns/\fItype\fR.
++
++.SH OPTIONS
++.TP
++.BR \-l , " \-\-list"
++Use list output format.
++.TP
++.BR \-n , " \-\-noheadings"
++Do not print a header line.
++.TP
++.BR \-o , " \-\-output " \fIlist\fP
++Specify which output columns to print.  Use \fB\-\-help\fR
++to get a list of all supported columns.
++
++The default list of columns may be extended if \fIlist\fP is
++specified in the format \fB+\fIlist\fP (e.g. \fBlsns \-o +PATH\fP).
++.TP
++.BR \-p , " \-\-task " \fIpid\fP
++Display only the namespaces held by the process with this \fIpid\fR.
++.TP
++.BR \-r , " \-\-raw"
++Use the raw output format.
++.TP
++.BR \-t , " \-\-type " \fItype\fP
++Display the specified \fItype\fP of namespaces only.  The supported types are
++\fBmnt\fP, \fBnet\fP, \fBipc\fP, \fBuser\fP, \fBpid\fP and \fButs\fP.  This
++option may be given more than once.
++.TP
++.BR \-u , " \-\-notruncate"
++Do not truncate text in columns.
++.TP
++.BR \-V , " \-\-version"
++Display version information and exit.
++.TP
++.BR \-h , " \-\-help"
++Display help text and exit.
++
++.SH AUTHORS
++.nf
++Karel Zak <kzak@redhat.com>
++.fi
++
++.SH "SEE ALSO"
++.BR unshare (1),
++.BR nsenter (1),
++.BR clone (2)
++
++.SH AVAILABILITY
++The lsns command is part of the util-linux package and is available from
++ftp://ftp.kernel.org/pub/linux/utils/util-linux/.
+diff --git a/sys-utils/lsns.c b/sys-utils/lsns.c
+new file mode 100644
+index 0000000..5ee2981
+--- /dev/null
++++ b/sys-utils/lsns.c
+@@ -0,0 +1,748 @@
++/*
++ * lsns(8) - list system namespaces
++ *
++ * Copyright (C) 2015 Karel Zak <kzak@redhat.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it would be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++#include <stdio.h>
++#include <string.h>
++#include <getopt.h>
++#include <stdlib.h>
++#include <assert.h>
++#include <dirent.h>
++#include <unistd.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <wchar.h>
++#include <libsmartcols.h>
++
++#include "pathnames.h"
++#include "nls.h"
++#include "xalloc.h"
++#include "c.h"
++#include "list.h"
++#include "closestream.h"
++#include "optutils.h"
++#include "procutils.h"
++#include "strutils.h"
++#include "namespace.h"
++#include "path.h"
++#include "idcache.h"
++
++#include "debug.h"
++
++UL_DEBUG_DEFINE_MASK(lsns);
++UL_DEBUG_DEFINE_MASKNAMES(lsns) = UL_DEBUG_EMPTY_MASKNAMES;
++
++#define LSNS_DEBUG_INIT		(1 << 1)
++#define LSNS_DEBUG_PROC		(1 << 2)
++#define LSNS_DEBUG_NS		(1 << 3)
++#define LSNS_DEBUG_ALL		0xFFFF
++
++#define DBG(m, x)       __UL_DBG(lsns, LSNS_DEBUG_, m, x)
++#define ON_DBG(m, x)    __UL_DBG_CALL(lsns, LSNS_DEBUG_, m, x)
++
++struct idcache *uid_cache = NULL;
++
++/* column IDs */
++enum {
++	COL_NS = 0,
++	COL_TYPE,
++	COL_PATH,
++	COL_NPROCS,
++	COL_PID,
++	COL_PPID,
++	COL_COMMAND,
++	COL_UID,
++	COL_USER
++};
++
++/* column names */
++struct colinfo {
++	const char *name; /* header */
++	double	   whint; /* width hint (N < 1 is in percent of termwidth) */
++	int	   flags; /* SCOLS_FL_* */
++	const char *help;
++};
++
++/* columns descriptions */
++static const struct colinfo infos[] = {
++	[COL_NS]      = { "NS",     10, SCOLS_FL_RIGHT, N_("namespace identifier (inode number)") },
++	[COL_TYPE]    = { "TYPE",    5, 0, N_("kind of namespace") },
++	[COL_PATH]    = { "PATH",    0, 0, N_("path to the namespace")},
++	[COL_NPROCS]  = { "NPROCS",  5, SCOLS_FL_RIGHT, N_("number of processes in the namespace") },
++	[COL_PID]     = { "PID",     5, SCOLS_FL_RIGHT, N_("lowest PID in the namespace") },
++	[COL_PPID]    = { "PPID",    5, SCOLS_FL_RIGHT, N_("PPID of the PID") },
++	[COL_COMMAND] = { "COMMAND", 0, SCOLS_FL_TRUNC, N_("command line of the PID")},
++	[COL_UID]     = { "UID",     0, SCOLS_FL_RIGHT, N_("UID of the PID")},
++	[COL_USER]    = { "USER",    0, 0, N_("username of the PID")}
++};
++
++static int columns[ARRAY_SIZE(infos) * 2];
++static size_t ncolumns;
++
++enum {
++	LSNS_ID_MNT = 0,
++	LSNS_ID_NET,
++	LSNS_ID_PID,
++	LSNS_ID_UTS,
++	LSNS_ID_IPC,
++	LSNS_ID_USER
++};
++
++static char *ns_names[] = {
++	[LSNS_ID_MNT] = "mnt",
++	[LSNS_ID_NET] = "net",
++	[LSNS_ID_PID] = "pid",
++	[LSNS_ID_UTS] = "uts",
++	[LSNS_ID_IPC] = "ipc",
++	[LSNS_ID_USER] = "user"
++};
++
++struct lsns_namespace {
++	ino_t id;
++	int type;			/* LSNS_* */
++	int nprocs;
++
++	struct lsns_process *proc;
++
++	struct list_head namespaces;	/* lsns->processes member */
++	struct list_head processes;	/* head of lsns_process *siblings */
++};
++
++struct lsns_process {
++	pid_t pid;		/* process PID */
++	pid_t ppid;		/* parent's PID */
++	pid_t tpid;		/* thread group */
++	char state;
++	uid_t uid;
++
++	ino_t            ns_ids[ARRAY_SIZE(ns_names)];
++	struct list_head ns_siblings[ARRAY_SIZE(ns_names)];
++
++	struct list_head processes;	/* list of processes */
++
++	struct libscols_line *outline;
++	struct lsns_process *parent;
++};
++
++struct lsns {
++	struct list_head processes;
++	struct list_head namespaces;
++
++	pid_t	fltr_pid;	/* filter out by PID */
++	ino_t	fltr_ns;	/* filter out by namespace */
++	int	fltr_types[ARRAY_SIZE(ns_names)];
++	int	fltr_ntypes;
++
++	unsigned int raw	: 1,
++		     tree	: 1,
++		     list	: 1,
++		     notrunc	: 1,
++		     no_headings: 1;
++};
++
++static void lsns_init_debug(void)
++{
++	__UL_INIT_DEBUG(lsns, LSNS_DEBUG_, 0, LSNS_DEBUG);
++}
++
++static int ns_name2type(const char *name)
++{
++	size_t i;
++
++	for (i = 0; i < ARRAY_SIZE(ns_names); i++) {
++		if (strcmp(ns_names[i], name) == 0)
++			return i;
++	}
++	return -1;
++}
++
++static int column_name_to_id(const char *name, size_t namesz)
++{
++	size_t i;
++
++	assert(name);
++
++	for (i = 0; i < ARRAY_SIZE(infos); i++) {
++		const char *cn = infos[i].name;
++
++		if (!strncasecmp(name, cn, namesz) && !*(cn + namesz))
++			return i;
++	}
++	warnx(_("unknown column: %s"), name);
++	return -1;
++}
++
++static inline int get_column_id(int num)
++{
++	assert(num >= 0);
++	assert((size_t) num < ncolumns);
++	assert(columns[num] < (int) ARRAY_SIZE(infos));
++
++	return columns[num];
++}
++
++static inline const struct colinfo *get_column_info(unsigned num)
++{
++	return &infos[ get_column_id(num) ];
++}
++
++static ino_t get_ns_ino(int dir, const char *nsname, ino_t *ino)
++{
++	struct stat st;
++	char path[16];
++
++	snprintf(path, sizeof(path), "ns/%s", nsname);
++
++	if (fstatat(dir, path, &st, 0) != 0)
++		return -errno;
++	*ino = st.st_ino;
++	return 0;
++}
++
++
++static int read_process(struct lsns *ls, pid_t pid)
++{
++	struct lsns_process *p = NULL;
++	char buf[BUFSIZ];
++	DIR *dir;
++	int rc = 0, fd;
++	FILE *f = NULL;
++	size_t i;
++	struct stat st;
++
++	DBG(PROC, ul_debug("reading %d", (int) pid));
++
++	snprintf(buf, sizeof(buf), "/proc/%d", pid);
++	dir = opendir(buf);
++	if (!dir)
++		return -errno;
++
++	p = xcalloc(1, sizeof(*p));
++	if (!p) {
++		rc = -ENOMEM;
++		goto done;
++	}
++
++	if (fstat(dirfd(dir), &st) == 0) {
++		p->uid = st.st_uid;
++		add_uid(uid_cache, st.st_uid);
++	}
++
++	fd = openat(dirfd(dir), "stat", O_RDONLY);
++	if (fd < 0) {
++		rc = -errno;
++		goto done;
++	}
++	if (!(f = fdopen(fd, "r"))) {
++		rc = -errno;
++		goto done;
++	}
++	rc = fscanf(f, "%d %*s %c %d*[^\n]", &p->pid, &p->state, &p->ppid);
++	if (rc != 3) {
++		rc = rc < 0 ? -errno : -EINVAL;
++		goto done;
++	}
++	rc = 0;
++
++	for (i = 0; i < ARRAY_SIZE(p->ns_ids); i++) {
++		INIT_LIST_HEAD(&p->ns_siblings[i]);
++
++		if (!ls->fltr_types[i])
++			continue;
++
++		rc = get_ns_ino(dirfd(dir), ns_names[i], &p->ns_ids[i]);
++		if (rc && rc != -EACCES)
++			goto done;
++		rc = 0;
++	}
++
++	INIT_LIST_HEAD(&p->processes);
++
++	DBG(PROC, ul_debugobj(p, "new pid=%d", p->pid));
++	list_add_tail(&p->processes, &ls->processes);
++done:
++	if (f)
++		fclose(f);
++	closedir(dir);
++	if (rc)
++		free(p);
++	return rc;
++}
++
++static int read_processes(struct lsns *ls)
++{
++	struct proc_processes *proc = NULL;
++	pid_t pid;
++	int rc = 0;
++
++	DBG(PROC, ul_debug("opening /proc"));
++
++	if (!(proc = proc_open_processes())) {
++		rc = -errno;
++		goto done;
++	}
++
++	while (proc_next_pid(proc, &pid) == 0) {
++		rc = read_process(ls, pid);
++		if (rc && rc != -EACCES && rc != -ENOENT)
++			break;
++		rc = 0;
++	}
++done:
++	DBG(PROC, ul_debug("closing /proc"));
++	proc_close_processes(proc);
++	return rc;
++}
++
++static struct lsns_namespace *get_namespace(struct lsns *ls, ino_t ino)
++{
++	struct list_head *p;
++
++	list_for_each(p, &ls->namespaces) {
++		struct lsns_namespace *ns = list_entry(p, struct lsns_namespace, namespaces);
++
++		if (ns->id == ino)
++			return ns;
++	}
++	return NULL;
++}
++
++static int namespace_has_process(struct lsns_namespace *ns, pid_t pid)
++{
++	struct list_head *p;
++
++	list_for_each(p, &ns->processes) {
++		struct lsns_process *proc = list_entry(p, struct lsns_process, ns_siblings[ns->type]);
++
++		if (proc->pid == pid)
++			return 1;
++	}
++	return 0;
++}
++
++static struct lsns_namespace *add_namespace(struct lsns *ls, int type, ino_t ino)
++{
++	struct lsns_namespace *ns = xcalloc(1, sizeof(*ns));
++
++	if (!ns)
++		return NULL;
++
++	DBG(NS, ul_debugobj(ns, "new %s[%ju]", ns_names[type], (uintmax_t)ino));
++
++	INIT_LIST_HEAD(&ns->processes);
++	INIT_LIST_HEAD(&ns->namespaces);
++
++	ns->type = type;
++	ns->id = ino;
++
++	list_add_tail(&ns->namespaces, &ls->namespaces);
++	return ns;
++}
++
++static int add_process_to_namespace(struct lsns *ls, struct lsns_namespace *ns, struct lsns_process *proc)
++{
++	struct list_head *p;
++
++	DBG(NS, ul_debugobj(ns, "add process [%p] pid=%d to %s[%ju]",
++		proc, proc->pid, ns_names[ns->type], (uintmax_t)ns->id));
++
++	list_for_each(p, &ls->processes) {
++		struct lsns_process *xproc = list_entry(p, struct lsns_process, processes);
++
++		if (xproc->pid == proc->ppid)		/* my parent */
++			proc->parent = xproc;
++		else if (xproc->ppid == proc->pid)	/* my child */
++			xproc->parent = proc;
++	}
++
++	list_add_tail(&proc->ns_siblings[ns->type], &ns->processes);
++	ns->nprocs++;
++
++	if (!ns->proc || ns->proc->pid > proc->pid)
++		ns->proc = proc;
++
++	return 0;
++}
++
++static int cmp_namespaces(struct list_head *a, struct list_head *b,
++			  __attribute__((__unused__)) void *data)
++{
++	struct lsns_namespace *xa = list_entry(a, struct lsns_namespace, namespaces),
++			      *xb = list_entry(b, struct lsns_namespace, namespaces);
++
++	return cmp_numbers(xa->id, xb->id);
++}
++
++static int read_namespaces(struct lsns *ls)
++{
++	struct list_head *p;
++
++	DBG(NS, ul_debug("reading namespace"));
++
++	list_for_each(p, &ls->processes) {
++		size_t i;
++		struct lsns_namespace *ns;
++		struct lsns_process *proc = list_entry(p, struct lsns_process, processes);
++
++		for (i = 0; i < ARRAY_SIZE(proc->ns_ids); i++) {
++			if (proc->ns_ids[i] == 0)
++				continue;
++			if (!(ns = get_namespace(ls, proc->ns_ids[i]))) {
++				ns = add_namespace(ls, i, proc->ns_ids[i]);
++				if (!ns)
++					return -ENOMEM;
++			}
++			add_process_to_namespace(ls, ns, proc);
++		}
++	}
++
++	list_sort(&ls->namespaces, cmp_namespaces, NULL);
++
++	return 0;
++}
++
++static void add_scols_line(struct lsns *ls, struct libscols_table *table,
++			   struct lsns_namespace *ns, struct lsns_process *proc)
++{
++	size_t i;
++	struct libscols_line *line;
++
++	assert(ns);
++	assert(table);
++
++	line = scols_table_new_line(table,
++			ls->tree && proc->parent ? proc->parent->outline : NULL);
++	if (!line) {
++		warn(_("failed to add line to output"));
++		return;
++	}
++
++	for (i = 0; i < ncolumns; i++) {
++		char *str = NULL;
++
++		switch (get_column_id(i)) {
++		case COL_NS:
++			xasprintf(&str, "%ju", (uintmax_t)ns->id);
++			break;
++		case COL_PID:
++			xasprintf(&str, "%d", (int) proc->pid);
++			break;
++		case COL_PPID:
++			xasprintf(&str, "%d", (int) proc->ppid);
++			break;
++		case COL_TYPE:
++			xasprintf(&str, "%s", ns_names[ns->type]);
++			break;
++		case COL_NPROCS:
++			xasprintf(&str, "%d", ns->nprocs);
++			break;
++		case COL_COMMAND:
++			str = proc_get_command(proc->pid);
++			if (!str)
++				str = proc_get_command_name(proc->pid);
++			break;
++		case COL_PATH:
++			xasprintf(&str, "/proc/%d/ns/%s", (int) proc->pid, ns_names[ns->type]);
++			break;
++		case COL_UID:
++			xasprintf(&str, "%d", (int) proc->uid);
++			break;
++		case COL_USER:
++			xasprintf(&str, "%s", get_id(uid_cache, proc->uid)->name);
++			break;
++		default:
++			break;
++		}
++
++		if (str)
++			scols_line_set_data(line, i, str);
++	}
++
++	proc->outline = line;
++}
++
++static struct libscols_table *init_scols_table(struct lsns *ls)
++{
++	struct libscols_table *tab;
++	size_t i;
++
++	tab = scols_new_table();
++	if (!tab) {
++		warn(_("failed to initialize output table"));
++		return NULL;
++	}
++
++	scols_table_enable_raw(tab, ls->raw);
++	scols_table_enable_noheadings(tab, ls->no_headings);
++
++	for (i = 0; i < ncolumns; i++) {
++		const struct colinfo *col = get_column_info(i);
++		int flags = col->flags;
++
++		if (ls->notrunc)
++		       flags &= ~SCOLS_FL_TRUNC;
++		if (ls->tree && get_column_id(i) == COL_COMMAND)
++			flags |= SCOLS_FL_TREE;
++
++		if (!scols_table_new_column(tab, col->name, col->whint, flags)) {
++			warnx(_("failed to initialize output column"));
++			goto err;
++		}
++	}
++
++	return tab;
++err:
++	scols_unref_table(tab);
++	return NULL;
++}
++
++static int show_namespaces(struct lsns *ls)
++{
++	struct libscols_table *tab;
++	struct list_head *p;
++	int rc = 0;
++
++	tab = init_scols_table(ls);
++	if (!tab)
++		return -ENOMEM;
++
++	list_for_each(p, &ls->namespaces) {
++		struct lsns_namespace *ns = list_entry(p, struct lsns_namespace, namespaces);
++
++		if (ls->fltr_pid != 0 && !namespace_has_process(ns, ls->fltr_pid))
++			continue;
++
++		add_scols_line(ls, tab, ns, ns->proc);
++	}
++
++	scols_print_table(tab);
++	scols_unref_table(tab);
++	return rc;
++}
++
++static void show_process(struct lsns *ls, struct libscols_table *tab,
++			 struct lsns_process *proc, struct lsns_namespace *ns)
++{
++	/*
++	 * create a tree from parent->child relation, but only if the parent is
++	 * within the same namespace
++	 */
++	if (ls->tree
++	    && proc->parent
++	    && !proc->parent->outline
++	    && proc->parent->ns_ids[ns->type] == proc->ns_ids[ns->type])
++		show_process(ls, tab, proc->parent, ns);
++
++	add_scols_line(ls, tab, ns, proc);
++}
++
++
++static int show_namespace_processes(struct lsns *ls, struct lsns_namespace *ns)
++{
++	struct libscols_table *tab;
++	struct list_head *p;
++
++	tab = init_scols_table(ls);
++	if (!tab)
++		return -ENOMEM;
++
++	list_for_each(p, &ns->processes) {
++		struct lsns_process *proc = list_entry(p, struct lsns_process, ns_siblings[ns->type]);
++
++		if (!proc->outline)
++			show_process(ls, tab, proc, ns);
++	}
++
++
++	scols_print_table(tab);
++	scols_unref_table(tab);
++	return 0;
++}
++
++static void __attribute__ ((__noreturn__)) usage(FILE * out)
++{
++	size_t i;
++
++	fputs(USAGE_HEADER, out);
++
++	fprintf(out,
++		_(" %s [options] [<namespace>]\n"), program_invocation_short_name);
++
++	fputs(USAGE_SEPARATOR, out);
++	fputs(_("List system namespaces.\n"), out);
++
++	fputs(USAGE_OPTIONS, out);
++	fputs(_(" -l, --list             use list format output\n"), out);
++	fputs(_(" -n, --noheadings       don't print headings\n"), out);
++	fputs(_(" -o, --output <list>    define which output columns to use\n"), out);
++	fputs(_(" -p, --task <pid>       print process namespaces\n"), out);
++	fputs(_(" -r, --raw              use the raw output format\n"), out);
++	fputs(_(" -u, --notruncate       don't truncate text in columns\n"), out);
++	fputs(_(" -t, --type <name>      namespace type (mnt, net, ipc, user, pid, uts)\n"), out);
++
++	fputs(USAGE_SEPARATOR, out);
++	fputs(USAGE_HELP, out);
++	fputs(USAGE_VERSION, out);
++
++	fputs(_("\nAvailable columns (for --output):\n"), out);
++
++	for (i = 0; i < ARRAY_SIZE(infos); i++)
++		fprintf(out, " %11s  %s\n", infos[i].name, _(infos[i].help));
++
++	fprintf(out, USAGE_MAN_TAIL("lsns(8)"));
++
++	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
++}
++
++
++int main(int argc, char *argv[])
++{
++	struct lsns ls;
++	int c;
++	int r = 0;
++	char *outarg = NULL;
++	static const struct option long_opts[] = {
++		{ "task",       required_argument, NULL, 'p' },
++		{ "help",	no_argument,       NULL, 'h' },
++		{ "output",     required_argument, NULL, 'o' },
++		{ "notruncate", no_argument,       NULL, 'u' },
++		{ "version",    no_argument,       NULL, 'V' },
++		{ "noheadings", no_argument,       NULL, 'n' },
++		{ "list",       no_argument,       NULL, 'l' },
++		{ "raw",        no_argument,       NULL, 'r' },
++		{ "type",       required_argument, NULL, 't' },
++		{ NULL, 0, NULL, 0 }
++	};
++
++	static const ul_excl_t excl[] = {	/* rows and cols in ASCII order */
++		{ 'J','r' },
++		{ 0 }
++	};
++	int excl_st[ARRAY_SIZE(excl)] = UL_EXCL_STATUS_INIT;
++
++	setlocale(LC_ALL, "");
++	bindtextdomain(PACKAGE, LOCALEDIR);
++	textdomain(PACKAGE);
++	atexit(close_stdout);
++
++	lsns_init_debug();
++	memset(&ls, 0, sizeof(ls));
++
++	INIT_LIST_HEAD(&ls.processes);
++	INIT_LIST_HEAD(&ls.namespaces);
++
++	while ((c = getopt_long(argc, argv,
++				"lp:o:nruhVt:", long_opts, NULL)) != -1) {
++
++		err_exclusive_options(c, long_opts, excl, excl_st);
++
++		switch(c) {
++		case 'l':
++			ls.list = 1;
++			break;
++		case 'o':
++			outarg = optarg;
++			break;
++		case 'V':
++			printf(UTIL_LINUX_VERSION);
++			return EXIT_SUCCESS;
++		case 'p':
++			ls.fltr_pid = strtos32_or_err(optarg, _("invalid PID argument"));
++			break;
++		case 'h':
++			usage(stdout);
++		case 'n':
++			ls.no_headings = 1;
++			break;
++		case 'r':
++			ls.raw = 1;
++			break;
++		case 'u':
++			ls.notrunc = 1;
++			break;
++		case 't':
++		{
++			int type = ns_name2type(optarg);
++			if (type < 0)
++				errx(EXIT_FAILURE, _("unknown namespace type: %s"), optarg);
++			ls.fltr_types[type] = 1;
++			ls.fltr_ntypes++;
++			break;
++		}
++		case '?':
++		default:
++			usage(stderr);
++		}
++	}
++
++	if (!ls.fltr_ntypes) {
++		size_t i;
++		for (i = 0; i < ARRAY_SIZE(ns_names); i++)
++			ls.fltr_types[i] = 1;
++	}
++
++	if (optind < argc) {
++		if (ls.fltr_pid)
++			errx(EXIT_FAILURE, _("--task is mutually exclusive with <namespace>"));
++		ls.fltr_ns = strtou64_or_err(argv[optind], _("invalid namespace argument"));
++		ls.tree = ls.list ? 0 : 1;
++
++		if (!ncolumns) {
++			columns[ncolumns++] = COL_PID;
++			columns[ncolumns++] = COL_PPID;
++			columns[ncolumns++] = COL_USER;
++			columns[ncolumns++] = COL_COMMAND;
++		}
++	}
++
++	if (!ncolumns) {
++		columns[ncolumns++] = COL_NS;
++		columns[ncolumns++] = COL_TYPE;
++		columns[ncolumns++] = COL_NPROCS;
++		columns[ncolumns++] = COL_PID;
++		columns[ncolumns++] = COL_USER;
++		columns[ncolumns++] = COL_COMMAND;
++	}
++
++	if (outarg && string_add_to_idarray(outarg, columns, ARRAY_SIZE(columns),
++					(int *) &ncolumns, column_name_to_id) < 0)
++		return EXIT_FAILURE;
++
++	scols_init_debug(0);
++
++	uid_cache = new_idcache();
++	if (!uid_cache)
++		err(EXIT_FAILURE, _("failed to allocate UID cache"));
++
++	r = read_processes(&ls);
++	if (!r)
++		r = read_namespaces(&ls);
++	if (!r) {
++		if (ls.fltr_ns) {
++			struct lsns_namespace *ns = get_namespace(&ls, ls.fltr_ns);
++
++			if (!ns)
++				errx(EXIT_FAILURE, _("not found namespace: %ju"), (uintmax_t) ls.fltr_ns);
++			r = show_namespace_processes(&ls, ns);
++		} else
++			r = show_namespaces(&ls);
++	}
++
++	free_idcache(uid_cache);
++	return r == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
++}
+-- 
+2.7.4
+

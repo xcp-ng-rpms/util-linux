@@ -1,0 +1,87 @@
+From 1b6deafbe0a671d4fd7b8b6e9cc23c8dfcd8683c Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 13 Jun 2017 12:15:11 +0200
+Subject: [PATCH 130/135] lscpu: cleanup DMI detection return codes
+
+Michal wrote:
+ There is weird mix of logic in lscpu-dmi.c which sometimes returns 0 and
+ sometimes -1 on error. Since most checks are if (rc) goto done; this
+ bails out early on error skipping some detection methods. Further, in
+ lscpu.c all following detections are guarder by if(hyper) so returning
+ -1 causes all following methods to be skipped.
+
+Upstream: http://github.com/karelzak/util-linux/commit/c972852b29391c35b1d5c7d3e1e6413e0cc86908
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1468646
+Reported-by: Michal Suchanek <msuchanek@suse.de>
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/lscpu-dmi.c | 21 +++++++++++++--------
+ 1 file changed, 13 insertions(+), 8 deletions(-)
+
+diff --git a/sys-utils/lscpu-dmi.c b/sys-utils/lscpu-dmi.c
+index a8298ff74..e4afd0b92 100644
+--- a/sys-utils/lscpu-dmi.c
++++ b/sys-utils/lscpu-dmi.c
+@@ -172,7 +172,7 @@ done:
+ static int hypervisor_decode_legacy(uint8_t *buf, const char *devmem)
+ {
+ 	if (!checksum(buf, 0x0F))
+-		return HYPER_NONE;
++		return -1;
+ 
+ 	return hypervisor_from_dmi_table(DWORD(buf + 0x08), WORD(buf + 0x06),
+ 			 WORD(buf + 0x0C),
+@@ -252,11 +252,15 @@ int read_hypervisor_dmi(void)
+ 	    || sizeof(uint16_t) != 2
+ 	    || sizeof(uint32_t) != 4
+ 	    || '\0' != 0)
+-		return rc;
++		goto done;
+ 
++	/* -1 : no DMI in /sys,
++	 *  0 : DMI exist, nothing detected (HYPER_NONE)
++	 * >0 : hypervisor detected
++	 */
+ 	rc = hypervisor_decode_sysfw();
+-	if (rc >= 0)
+-		return rc;
++	if (rc >= HYPER_NONE)
++		goto done;
+ 
+ 	/* First try EFI (ia64, Intel-based Mac) */
+ 	switch (address_from_efi(&fp)) {
+@@ -271,8 +275,9 @@ int read_hypervisor_dmi(void)
+ 		goto done;
+ 
+ 	rc = hypervisor_decode_smbios(buf, _PATH_DEV_MEM);
+-	if (rc)
++	if (rc >= HYPER_NONE)
+ 		goto done;
++
+ 	free(buf);
+ 	buf = NULL;
+ memory_scan:
+@@ -285,17 +290,17 @@ memory_scan:
+ 	for (fp = 0; fp <= 0xFFF0; fp += 16) {
+ 		if (memcmp(buf + fp, "_SM_", 4) == 0 && fp <= 0xFFE0) {
+ 			rc = hypervisor_decode_smbios(buf + fp, _PATH_DEV_MEM);
+-			if (rc == -1)
++			if (rc < 0)
+ 				fp += 16;
+ 
+ 		} else if (memcmp(buf + fp, "_DMI_", 5) == 0)
+ 			rc = hypervisor_decode_legacy(buf + fp, _PATH_DEV_MEM);
+ 
+-		if (rc >= 0)
++		if (rc >= HYPER_NONE)
+ 			break;
+ 	}
+ #endif
+ done:
+ 	free(buf);
+-	return rc;
++	return rc < 0 ? HYPER_NONE : rc;
+ }
+-- 
+2.13.6
+

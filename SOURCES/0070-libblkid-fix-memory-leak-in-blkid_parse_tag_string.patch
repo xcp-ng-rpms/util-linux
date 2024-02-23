@@ -1,0 +1,44 @@
+From 8af4232ff50154588c75f25a951b5619f05d0421 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 19 Nov 2013 17:52:56 +0100
+Subject: [PATCH 70/84] libblkid: fix memory leak in blkid_parse_tag_string()
+
+Upstream: http://github.com/karelzak/util-linux/commit/c1178175e7adb35388a3e34495974d7f24f45d5d
+Upstream: http://github.com/karelzak/util-linux/commit/aab691cf8deb4a53782a0317b6f96c5d8b61f8e9
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1335671
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libblkid/src/tag.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/libblkid/src/tag.c b/libblkid/src/tag.c
+index 3a70950..3aede04 100644
+--- a/libblkid/src/tag.c
++++ b/libblkid/src/tag.c
+@@ -237,14 +237,18 @@ int blkid_parse_tag_string(const char *token, char **ret_type, char **ret_val)
+ 			goto errout; /* missing closing quote */
+ 		*cp = '\0';
+ 	}
+-	value = value && *value ? strdup(value) : NULL;
+-	if (!value)
+-		goto errout;
++
++	if (ret_val) {
++		value = *value ? strdup(value) : NULL;
++		if (!value)
++			goto errout;
++		*ret_val = value;
++	}
+ 
+ 	if (ret_type)
+ 		*ret_type = name;
+-	if (ret_val)
+-		*ret_val = value;
++	else
++		free(name);
+ 
+ 	return 0;
+ 
+-- 
+2.7.4
+

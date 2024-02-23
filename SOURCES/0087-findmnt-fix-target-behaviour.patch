@@ -1,0 +1,106 @@
+From fbdd962ca187399cab3b0bf78d740e5fb304e0bf Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Fri, 16 Dec 2016 12:19:32 +0100
+Subject: [PATCH] findmnt: fix --target behaviour
+
+Upstream: https://github.com/karelzak/util-linux/commit/80c31a0b596125b387c6b27c899e8bad4e46680b
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1405238
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libmount/src/mountP.h |  1 +
+ libmount/src/tab.c    |  4 ++++
+ libmount/src/utils.c  |  9 +++++++++
+ misc-utils/findmnt.c  | 10 +++-------
+ 4 files changed, 17 insertions(+), 7 deletions(-)
+
+diff --git a/libmount/src/mountP.h b/libmount/src/mountP.h
+index 7b0848f..6cabced 100644
+--- a/libmount/src/mountP.h
++++ b/libmount/src/mountP.h
+@@ -164,6 +164,7 @@ extern int mnt_get_filesystems(char ***filesystems, const char *pattern);
+ extern void mnt_free_filesystems(char **filesystems);
+ 
+ extern char *mnt_get_kernel_cmdline_option(const char *name);
++extern int mnt_stat_mountpoint(const char *target, struct stat *st);
+ 
+ /* tab.c */
+ extern int mnt_table_set_parser_fltrcb(	struct libmnt_table *tb,
+diff --git a/libmount/src/tab.c b/libmount/src/tab.c
+index 10ee7ce..5628da6 100644
+--- a/libmount/src/tab.c
++++ b/libmount/src/tab.c
+@@ -528,6 +528,7 @@ struct libmnt_fs *mnt_table_find_mountpoint(struct libmnt_table *tb,
+ 					    int direction)
+ {
+ 	char *mnt;
++	struct stat st;
+ 
+ 	if (!tb || !path || !*path)
+ 		return NULL;
+@@ -536,6 +537,9 @@ struct libmnt_fs *mnt_table_find_mountpoint(struct libmnt_table *tb,
+ 
+ 	DBG(TAB, mnt_debug_h(tb, "lookup MOUNTPOINT: '%s'", path));
+ 
++	if (mnt_stat_mountpoint(path, &st))
++		return NULL;
++
+ 	mnt = strdup(path);
+ 	if (!mnt)
+ 		return NULL;
+diff --git a/libmount/src/utils.c b/libmount/src/utils.c
+index c13fb96..5c374b4 100644
+--- a/libmount/src/utils.c
++++ b/libmount/src/utils.c
+@@ -104,6 +104,15 @@ static int fstype_cmp(const void *v1, const void *v2)
+ 	return strcmp(s1, s2);
+ }
+ 
++int mnt_stat_mountpoint(const char *target, struct stat *st)
++{
++#ifdef AT_NO_AUTOMOUNT
++	return fstatat(-1, target, st, AT_NO_AUTOMOUNT);
++#else
++	return stat(target, st);
++#endif
++}
++
+ /* returns basename and keeps dirname in the @path, if @path is "/" (root)
+  * then returns empty string */
+ char *stripoff_last_component(char *path)
+diff --git a/misc-utils/findmnt.c b/misc-utils/findmnt.c
+index fe899db..79ef12e 100644
+--- a/misc-utils/findmnt.c
++++ b/misc-utils/findmnt.c
+@@ -239,16 +239,15 @@ static void set_source_match(const char *data)
+ /* @tb has to be from kernel (so no fstab or so)! */
+ static void enable_extra_target_match(struct libmnt_table *tb)
+ {
+-	char *cn = NULL;
+-	const char *tgt = NULL, *mnt = NULL;
++	const char *tgt, *mnt = NULL;
+ 	struct libmnt_fs *fs;
+ 
+ 	/*
+ 	 * Check if match pattern is mountpoint, if not use the
+ 	 * real mountpoint.
+ 	 */
+-	cn = mnt_resolve_path(get_match(COL_TARGET), cache);
+-	if (!cn)
++	tgt = mnt_resolve_path(get_match(COL_TARGET), cache);
++	if (!tgt)
+ 		return;
+ 
+ 	fs = mnt_table_find_mountpoint(tb, tgt, MNT_ITER_BACKWARD);
+@@ -256,9 +255,6 @@ static void enable_extra_target_match(struct libmnt_table *tb)
+ 		mnt = mnt_fs_get_target(fs);
+ 	if (mnt && strcmp(mnt, tgt) != 0)
+ 		set_match(COL_TARGET, xstrdup(mnt));	/* replace the current setting */
+-
+-	/* replace the current setting with the real mountpoint */
+-	set_match(COL_TARGET, mnt);
+ }
+ 
+ 
+-- 
+2.7.4
+

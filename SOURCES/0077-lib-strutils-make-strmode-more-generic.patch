@@ -1,0 +1,76 @@
+From 7bf448fe38478b6e76824fa5bbd2d2d25a48f618 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 30 Jun 2015 12:41:13 +0200
+Subject: [PATCH 77/84] lib/strutils: make strmode() more generic
+
+Upstream: http://github.com/karelzak/util-linux/commit/7015df4936ca320a86d2916533a17499ac5e4fcf
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1153770
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ lib/strutils.c | 36 +++++++++++++++++++-----------------
+ 1 file changed, 19 insertions(+), 17 deletions(-)
+
+diff --git a/lib/strutils.c b/lib/strutils.c
+index c263b86..f9cdcbb 100644
+--- a/lib/strutils.c
++++ b/lib/strutils.c
+@@ -349,37 +349,39 @@ void strtotimeval_or_err(const char *str, struct timeval *tv, const char *errmes
+  */
+ void strmode(mode_t mode, char *str)
+ {
++	unsigned short i = 0;
++
+ 	if (S_ISDIR(mode))
+-		str[0] = 'd';
++		str[i++] = 'd';
+ 	else if (S_ISLNK(mode))
+-		str[0] = 'l';
++		str[i++] = 'l';
+ 	else if (S_ISCHR(mode))
+-		str[0] = 'c';
++		str[i++] = 'c';
+ 	else if (S_ISBLK(mode))
+-		str[0] = 'b';
++		str[i++] = 'b';
+ 	else if (S_ISSOCK(mode))
+-		str[0] = 's';
++		str[i++] = 's';
+ 	else if (S_ISFIFO(mode))
+-		str[0] = 'p';
++		str[i++] = 'p';
+ 	else if (S_ISREG(mode))
+-		str[0] = '-';
++		str[i++] = '-';
+ 
+-	str[1] = mode & S_IRUSR ? 'r' : '-';
+-	str[2] = mode & S_IWUSR ? 'w' : '-';
+-	str[3] = (mode & S_ISUID
++	str[i++] = mode & S_IRUSR ? 'r' : '-';
++	str[i++] = mode & S_IWUSR ? 'w' : '-';
++	str[i++] = (mode & S_ISUID
+ 		? (mode & S_IXUSR ? 's' : 'S')
+ 		: (mode & S_IXUSR ? 'x' : '-'));
+-	str[4] = mode & S_IRGRP ? 'r' : '-';
+-	str[5] = mode & S_IWGRP ? 'w' : '-';
+-	str[6] = (mode & S_ISGID
++	str[i++] = mode & S_IRGRP ? 'r' : '-';
++	str[i++] = mode & S_IWGRP ? 'w' : '-';
++	str[i++] = (mode & S_ISGID
+ 		? (mode & S_IXGRP ? 's' : 'S')
+ 		: (mode & S_IXGRP ? 'x' : '-'));
+-	str[7] = mode & S_IROTH ? 'r' : '-';
+-	str[8] = mode & S_IWOTH ? 'w' : '-';
+-	str[9] = (mode & S_ISVTX
++	str[i++] = mode & S_IROTH ? 'r' : '-';
++	str[i++] = mode & S_IWOTH ? 'w' : '-';
++	str[i++] = (mode & S_ISVTX
+ 		? (mode & S_IXOTH ? 't' : 'T')
+ 		: (mode & S_IXOTH ? 'x' : '-'));
+-	str[10] = '\0';
++	str[i] = '\0';
+ }
+ 
+ /*
+-- 
+2.7.4
+

@@ -1,0 +1,31 @@
+From 46d4d1c8d1b62c8f2dda1639e75b5d0e6bafaf27 Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Tue, 4 Apr 2017 12:06:45 +0200
+Subject: [PATCH 121/121] zramctl: be more specific about default output
+
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1358755
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ sys-utils/zramctl.8 | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/sys-utils/zramctl.8 b/sys-utils/zramctl.8
+index f6fc45c..9ca2983 100644
+--- a/sys-utils/zramctl.8
++++ b/sys-utils/zramctl.8
+@@ -39,9 +39,9 @@ Set up a zram device:
+ .SH DESCRIPTION
+ .B zramctl
+ is used to quickly set up zram device parameters, to reset zram devices, and to
+-query the status of used zram devices.  If no option is given, all zram devices
+-are shown.
+-
++query the status of used zram devices.
++.PP
++If no option is given, all non-zero size zram devices are shown.
+ .SH OPTIONS
+ .TP
+ .BR \-a , " \-\-algorithm lzo" | lz4
+-- 
+2.9.3
+

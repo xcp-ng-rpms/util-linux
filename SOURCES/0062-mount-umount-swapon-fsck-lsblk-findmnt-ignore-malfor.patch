@@ -1,0 +1,172 @@
+From 28663e752e125da99f8636ea0227d168f1e0e6aa Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Thu, 15 Oct 2015 11:53:44 +0200
+Subject: [PATCH 62/84] mount, umount, swapon, fsck, lsblk, findmnt: ignore
+ malformed lines
+
+The libmount provides way how to deal with parsing errors in fstab --
+on error callback function is executed and according to the return
+libmount manipulate with the malformed line, possible are three
+states:
+
+  1/ fatal error; all file ignored              (callback rc < 0)
+  2/ recoverable error; malformed line ignored  (callback rc > 0)
+  3/ ignore the error                           (callback rc == 0)
+
+The 2/ is the default if no callback specified.
+
+Unfortunately our utils uses 3/. The correct way is to use 2/.
+
+Upstream: http://github.com/karelzak/util-linux/commit/1cd9d0d7463850ef6b16a78b8a55e56dbf9a8db1
+Upstream: http://github.com/karelzak/util-linux/commit/1bb02a2da9f1bf7d80b352d540b29371099ab570
+Addresses: http://bugzilla.redhat.com/show_bug.cgi?id=1271850
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ disk-utils/fsck.c         |  2 +-
+ libmount/src/tab_parse.c  |  2 +-
+ misc-utils/findmnt.c      |  2 +-
+ misc-utils/lsblk.c        | 11 +++++++++++
+ sys-utils/mount.c         |  2 +-
+ sys-utils/swapon-common.c | 11 +++++++++++
+ sys-utils/umount.c        |  2 +-
+ 7 files changed, 27 insertions(+), 5 deletions(-)
+
+diff --git a/disk-utils/fsck.c b/disk-utils/fsck.c
+index 6e3a2c0..3ef8e5b 100644
+--- a/disk-utils/fsck.c
++++ b/disk-utils/fsck.c
+@@ -421,7 +421,7 @@ static int parser_errcb(struct libmnt_table *tb __attribute__ ((__unused__)),
+ 			const char *filename, int line)
+ {
+ 	warnx(_("%s: parse error at line %d -- ignore"), filename, line);
+-	return 0;
++	return 1;
+ }
+ 
+ /*
+diff --git a/libmount/src/tab_parse.c b/libmount/src/tab_parse.c
+index e930fd8..987e671 100644
+--- a/libmount/src/tab_parse.c
++++ b/libmount/src/tab_parse.c
+@@ -540,7 +540,7 @@ int mnt_table_parse_stream(struct libmnt_table *tb, FILE *f, const char *filenam
+ 		}
+ 		if (rc) {
+ 			mnt_free_fs(fs);
+-			if (rc == 1)
++			if (rc > 0)
+ 				continue;	/* recoverable error */
+ 			if (feof(f))
+ 				break;
+diff --git a/misc-utils/findmnt.c b/misc-utils/findmnt.c
+index 615ba08..f16da91 100644
+--- a/misc-utils/findmnt.c
++++ b/misc-utils/findmnt.c
+@@ -752,7 +752,7 @@ static int parser_errcb(struct libmnt_table *tb __attribute__ ((__unused__)),
+ 			const char *filename, int line)
+ {
+ 	warnx(_("%s: parse error at line %d"), filename, line);
+-	return 0;
++	return 1;
+ }
+ 
+ static char **append_tabfile(char **files, int *nfiles, char *filename)
+diff --git a/misc-utils/lsblk.c b/misc-utils/lsblk.c
+index 9e12a90..cd28c1d 100644
+--- a/misc-utils/lsblk.c
++++ b/misc-utils/lsblk.c
+@@ -337,6 +337,15 @@ static char *get_device_path(struct blkdev_cxt *cxt)
+ 	return xstrdup(path);
+ }
+ 
++static int table_parser_errcb(struct libmnt_table *tb __attribute__((__unused__)),
++			const char *filename, int line)
++{
++	if (filename)
++		warnx(_("%s: parse error: ignore entry at line %d."),
++							filename, line);
++	return 1;
++}
++
+ static int is_active_swap(const char *filename)
+ {
+ 	if (!swaps) {
+@@ -346,6 +355,7 @@ static int is_active_swap(const char *filename)
+ 		if (!mntcache)
+ 			mntcache = mnt_new_cache();
+ 
++		mnt_table_set_parser_errcb(swaps, table_parser_errcb);
+ 		mnt_table_set_cache(swaps, mntcache);
+ 		mnt_table_parse_swaps(swaps, NULL);
+ 	}
+@@ -368,6 +378,7 @@ static char *get_device_mountpoint(struct blkdev_cxt *cxt)
+ 		if (!mntcache)
+ 			mntcache = mnt_new_cache();
+ 
++		mnt_table_set_parser_errcb(mtab, table_parser_errcb);
+ 		mnt_table_set_cache(mtab, mntcache);
+ 		mnt_table_parse_mtab(mtab, NULL);
+ 	}
+diff --git a/sys-utils/mount.c b/sys-utils/mount.c
+index 0998b01..f332070 100644
+--- a/sys-utils/mount.c
++++ b/sys-utils/mount.c
+@@ -101,7 +101,7 @@ static int table_parser_errcb(struct libmnt_table *tb __attribute__((__unused__)
+ 	if (filename)
+ 		warnx(_("%s: parse error: ignore entry at line %d."),
+ 							filename, line);
+-	return 0;
++	return 1;
+ }
+ 
+ /*
+diff --git a/sys-utils/swapon-common.c b/sys-utils/swapon-common.c
+index 5c95ef3..5f14ddb 100644
+--- a/sys-utils/swapon-common.c
++++ b/sys-utils/swapon-common.c
+@@ -11,12 +11,22 @@ static struct libmnt_table *swaps, *fstab;
+ 
+ struct libmnt_cache *mntcache;
+ 
++static int table_parser_errcb(struct libmnt_table *tb __attribute__((__unused__)),
++			const char *filename, int line)
++{
++	if (filename)
++		warnx(_("%s: parse error: ignore entry at line %d."),
++							filename, line);
++	return 1;
++}
++
+ struct libmnt_table *get_fstab(void)
+ {
+ 	if (!fstab) {
+ 		fstab = mnt_new_table();
+ 		if (!fstab)
+ 			return NULL;
++		mnt_table_set_parser_errcb(fstab, table_parser_errcb);
+ 		mnt_table_set_cache(fstab, mntcache);
+ 		if (mnt_table_parse_fstab(fstab, NULL) != 0)
+ 			return NULL;
+@@ -32,6 +42,7 @@ struct libmnt_table *get_swaps(void)
+ 		if (!swaps)
+ 			return NULL;
+ 		mnt_table_set_cache(swaps, mntcache);
++		mnt_table_set_parser_errcb(swaps, table_parser_errcb);
+ 		if (mnt_table_parse_swaps(swaps, NULL) != 0)
+ 			return NULL;
+ 	}
+diff --git a/sys-utils/umount.c b/sys-utils/umount.c
+index 1bd275f..9c47744 100644
+--- a/sys-utils/umount.c
++++ b/sys-utils/umount.c
+@@ -45,7 +45,7 @@ static int table_parser_errcb(struct libmnt_table *tb __attribute__((__unused__)
+ 	if (filename)
+ 		warnx(_("%s: parse error: ignore entry at line %d."),
+ 							filename, line);
+-	return 0;
++	return 1;
+ }
+ 
+ 
+-- 
+2.7.4
+

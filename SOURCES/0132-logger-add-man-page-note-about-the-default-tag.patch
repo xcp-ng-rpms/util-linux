@@ -1,0 +1,28 @@
+From b97b85baf6281745b7f720a35d9e4bcc26e9ddcb Mon Sep 17 00:00:00 2001
+From: Karel Zak <kzak@redhat.com>
+Date: Mon, 16 May 2016 15:05:28 +0200
+Subject: [PATCH 132/135] logger: add man page note about the default --tag
+
+Upstream: http://github.com/karelzak/util-linux/commit/28b6c76f8a4ea1faa80fe779c2011bc433de28c6
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1336432
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ misc-utils/logger.1 | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/misc-utils/logger.1 b/misc-utils/logger.1
+index 57ca0d55a..3b55c8d7d 100644
+--- a/misc-utils/logger.1
++++ b/misc-utils/logger.1
+@@ -110,6 +110,8 @@ Output the message to standard error as well as to the system log.
+ \fB\-t\fR, \fB\-\-tag\fR \fItag\fR
+ Mark every line to be logged with the specified
+ .IR tag .
++The default tag is the name of the user logged in on the terminal (or a user
++name based on effective user ID).
+ .TP
+ \fB\-u\fR, \fB\-\-socket\fR \fIsocket\fR
+ Write to the specified
+-- 
+2.13.6
+

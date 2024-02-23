@@ -1,0 +1,31 @@
+From a569050329d914ad5aa15978f2a4a3d969c7c8b1 Mon Sep 17 00:00:00 2001
+From: Boris Egorov <egorov@linux.com>
+Date: Tue, 19 Jan 2016 11:37:57 +0600
+Subject: [PATCH 113/116] libblkid: (zfs) add cast to fix UB [cppcheck]
+
+[libblkid/src/superblocks/zfs.c:173]: (error) Shifting 32-bit value by 56 bits is undefined behaviour
+[libblkid/src/superblocks/zfs.c:173]: (error) Shifting 32-bit value by 40 bits is undefined behaviour
+
+Upstream: https://github.com/karelzak/util-linux/commit/18b76be61c11fd5f11fcb84aa6a946d3b03d7225
+Addresses: https://bugzilla.redhat.com/show_bug.cgi?id=1392661
+Signed-off-by: Karel Zak <kzak@redhat.com>
+---
+ libblkid/src/superblocks/zfs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libblkid/src/superblocks/zfs.c b/libblkid/src/superblocks/zfs.c
+index 5074495..ff12fa6 100644
+--- a/libblkid/src/superblocks/zfs.c
++++ b/libblkid/src/superblocks/zfs.c
+@@ -170,7 +170,7 @@ static void zfs_extract_guid_name(blkid_probe pr, loff_t offset)
+ 
+ static int find_uberblocks(const void *label, loff_t *ub_offset, int *swap_endian)
+ {
+-	uint64_t swab_magic = swab64(UBERBLOCK_MAGIC);
++	uint64_t swab_magic = swab64((uint64_t)UBERBLOCK_MAGIC);
+ 	struct zfs_uberblock *ub;
+ 	int i, found = 0;
+ 	loff_t offset = VDEV_LABEL_UBERBLOCK;
+-- 
+2.9.3
+
