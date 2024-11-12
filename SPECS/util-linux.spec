@@ -1133,6 +1133,9 @@ fi
 %{_libdir}/pkgconfig/uuid.pc
 
 %changelog
+* Wed Nov 20 2024 Lucas Ravagnier <lucas.ravagnier@vates.tech> 2.23.2-52.2
+- Fix CVE-2014-9114
+
 * Mon Feb 12 2024 Yann Dirson <yann.dirson@vates.fr> 2.23.2-52.1
 - backport --sector-size support
 
