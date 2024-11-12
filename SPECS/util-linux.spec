@@ -2,7 +2,7 @@
 Summary: A collection of basic system utilities
 Name: util-linux
 Version: 2.23.2
-Release: 52.1%{?dist}
+Release: 52.2%{?dist}
 License: GPLv2 and GPLv2+ and LGPLv2+ and BSD with advertising and Public Domain
 Group: System Environment/Base
 URL: http://en.wikipedia.org/wiki/Util-linux
@@ -399,6 +399,7 @@ Patch1000: 0001-losetup-Add-support-for-logical-block-size.patch
 Patch1001: 0002-losetup-rename-to-sector-size-and-LOG-SEC.patch
 Patch1002: 0003-losetup-properly-use-sector-size-when-create-a-new-d.patch
 Patch1003: 0004-losetup-Fix-typo-for-the-sector-size-docs.patch
+Patch1004: util-linux-2.23.2-CVE-2014-9114.backport.patch
 
 %description
 The util-linux package contains a large variety of low-level system
@@ -1462,7 +1463,7 @@ fi
 - apply pathes from upstream stable/v2.22 branch
 - fix #865961 - wipefs -a should use O_EXCL
 
-* Thu Oct 10 2012 Karel Zak <kzak@redhat.com> 2.22.1-1
+* Wed Oct 10 2012 Karel Zak <kzak@redhat.com> 2.22.1-1
 - upgrade to the release 2.22.1
 
 * Wed Oct  3 2012 Karel Zak <kzak@redhat.com> 2.22-2
@@ -1501,7 +1502,7 @@ fi
 * Thu Feb 09 2012 Karel Zak <kzak@redhat.com> 2.21-0.2
 - fix #788703 - /run/blkid does not exist
 
-* Thu Feb 07 2012 Karel Zak <kzak@redhat.com> 2.21-0.1
+* Tue Feb 07 2012 Karel Zak <kzak@redhat.com> 2.21-0.1
 - upgrade to the release 2.21-rc2
   ftp://ftp.kernel.org/pub/linux/utils/util-linux/v2.21/v2.21-ReleaseNotes
 - add {fsck,mkfs}.minix
@@ -1536,7 +1537,7 @@ fi
 - upgrade to the release 2.20-rc2
   ftp://ftp.kernel.org/pub/linux/utils/util-linux/v2.20/v2.20-rc2-ChangeLog
 
-* Fri Aug  2 2011 Karel Zak <kzak@redhat.com> 2.20-0.1
+* Tue Aug  2 2011 Karel Zak <kzak@redhat.com> 2.20-0.1
 - upgrade to the release 2.20-rc1
   ftp://ftp.kernel.org/pub/linux/utils/util-linux/v2.20/v2.20-ReleaseNotes
 
@@ -1644,7 +1645,7 @@ fi
 - remove Provides: lib{uuid,blkid}-static (thanks to Michael Schwendt)
 - remove useless URL to sf.net
 
-* Thu Jan  8 2010 Karel Zak <kzak@redhat.com> 2.17-1
+* Fri Jan  8 2010 Karel Zak <kzak@redhat.com> 2.17-1
 - upgrade to the final 2.17
   ftp://ftp.kernel.org/pub/linux/utils/util-linux-ng/v2.17/v2.17-ReleaseNotes
   ftp://ftp.kernel.org/pub/linux/utils/util-linux-ng/v2.17/v2.17-ChangeLog
@@ -1916,7 +1917,7 @@ fi
 - fix #217240 - namei ignores non-directory components instead of saying "Not a directory"
 - fix #217241 - namei enforces symlink limits inconsistently
 
-* Wed Dec 14 2006 Karel Zak <kzak@redhat.com> 2.13-0.46
+* Thu Dec 14 2006 Karel Zak <kzak@redhat.com> 2.13-0.46
 - fix leaking file descriptor in the more command (patch by Steve Grubb)
 
 * Wed Dec 13 2006 Karel Zak <kzak@redhat.com> 2.13-0.45
@@ -2040,11 +2041,11 @@ fi
 		This drastically increases the total number of tcp mounts
 		that can happen at once (ala autofs).
 
-* Wed Mar  9 2006 Jesse Keating <jkeating@redhat.com> 2.13-0.20
+* Thu Mar  9 2006 Jesse Keating <jkeating@redhat.com> 2.13-0.20
 - Better calling of restorecon as suggested by Bill Nottingham
 - prereq restorecon to avoid ordering issues
 
-* Wed Mar  9 2006 Jesse Keating <jkeating@redhat.com> 2.13-0.19
+* Thu Mar  9 2006 Jesse Keating <jkeating@redhat.com> 2.13-0.19
 - restorecon /var/log/lastlog
 
 * Wed Mar  8 2006 Karel Zak <kzak@redhat.com> 2.13-0.17
@@ -2293,7 +2294,7 @@ fi
 * Tue Mar 23 2004 Jeremy Katz <katzj@redhat.com> 2.12-15
 - mkcramfs: use PAGE_SIZE for default blocksize (#118681)
 
-* Sat Mar 20 2004 <SteveD@RedHat.com>
+* Sat Mar 20 2004 Steve Dickson <SteveD@RedHat.com>
 - Updated the nfs-mount.patch to correctly 
   handle the mounthost option and to ignore 
   servers that do not set auth flavors
@@ -2308,7 +2309,7 @@ fi
 - Ping NFS v4 servers before diving into kernel
 - Make v4 mount interruptible which also make the intr option on by default 
 
-* Sun Mar 13 2004  <SteveD@RedHat.com>
+* Sat Mar 13 2004 Steve Dickson <SteveD@RedHat.com>
 - Reworked how the rpc.idmapd and rpc.gssd checks were
   done due to review comments from upstream.
 - Added rpc_strerror() so the '-v' flag will show RPC errors.
@@ -2407,7 +2408,7 @@ fi
 * Wed Jul 23 2003 Elliot Lee <sopwith@redhat.com> 2.11y-22
 - #100433 patch
 
-* Mon Jun 14 2003 Elliot Lee <sopwith@redhat.com> 2.11y-20
+* Sat Jun 14 2003 Elliot Lee <sopwith@redhat.com> 2.11y-20
 - #97381 patch
 
 * Wed Jun 04 2003 Elliot Lee <sopwith@redhat.com>
@@ -2589,7 +2590,7 @@ slang-devel.
 * Tue Feb 26 2002 Elliot Lee <sopwith@redhat.com> 2.11n-5
 - Fix #60363 (tweak raw.8 man page, make rawdevices.8 symlink).
 
-* Tue Jan 28 2002 Bill Nottingham <notting@redhat.com> 2.11n-4
+* Mon Jan 28 2002 Bill Nottingham <notting@redhat.com> 2.11n-4
 - remove kbdrate (fixes kbd conflict)
 
 * Fri Dec 28 2001 Elliot Lee <sopwith@redhat.com> 2.11n-3
